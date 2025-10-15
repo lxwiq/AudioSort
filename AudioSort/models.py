@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import List
 
 
-@dataclass(slots=True)
+@dataclass
 class BookMetadata:
     title: str = ""
     authors: List[str] = field(default_factory=list)
@@ -51,7 +51,7 @@ class BookMetadata:
         }
 
 
-@dataclass(slots=True)
+@dataclass
 class ProcessingPlan:
     source_folder: Path
     destination_root: Path
