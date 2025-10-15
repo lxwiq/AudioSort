@@ -195,7 +195,13 @@ def download_cover(destination: Path, metadata: BookMetadata, session: requests.
     if dry_run or not metadata.cover_url:
         return
 
-    response = session.get(metadata.cover_url, headers={"user-agent": USER_AGENT}, timeout=20)
+    # Validate URL format before making request
+    cover_url = metadata.cover_url.strip()
+    if not cover_url.startswith(('http://', 'https://')):
+        print(f"⚠️  Invalid cover URL format: {cover_url}")
+        return
+
+    response = session.get(cover_url, headers={"user-agent": USER_AGENT}, timeout=20)
     if not response.ok:
         return
     suffix = _guess_extension(response.headers.get("content-type", ""))
