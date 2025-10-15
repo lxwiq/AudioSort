@@ -38,13 +38,19 @@
 ```
 {output_folder}/
 ├── {Author}/
-│   └── {Title}/
+│   └── {Series}_Series/       ← Smart series grouping
 │       ├── 01 - {Title}.mp3
 │       ├── 02 - {Title}.mp3
 │       ├── metadata.opf      ← AudiobookShelf
 │       ├── info.txt          ← SmartAudioBookPlayer
 │       └── cover.jpg
 ```
+
+**✨ NEW: Smart Series Grouping**
+- Automatically groups books from the same series together
+- Merges new books into existing series folders
+- Warns about file conflicts before overwriting
+- Supports adding books to existing collections
 
 ### 🎛️ **Complete Options**
 - `--flatten`: Flatten multi-disc folders
@@ -66,7 +72,7 @@
 ### Quick Installation
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/AudioSort.git
+git clone https://github.com/lxwiq/AudioSort.git
 cd AudioSort
 
 # Create virtual environment (recommended)
@@ -140,6 +146,28 @@ python -m AudioSort "my_collection/" --scan --auto --dry-run
 | **Preview** | Test without modifications | `./audiosort.sh --preview "folder"` |
 | **Safe** | Copy mode (no moving) | `./audiosort.sh --safe "folder"` |
 | **Basic** | Simple organization | `./audiosort.sh --basic "folder"` |
+
+### 🔧 **Conflict Management**
+
+AudioSort intelligently handles existing folders and files:
+
+#### **Existing Series Folders**
+```bash
+# If J.K._Rowling/Harry_Potter_Series/ already exists
+./audiosort.sh "Harry Potter Book 3"
+
+# Output:
+📁 Adding to existing folder: /path/to/J.K._Rowling/Harry_Potter_Series
+⚠️  2 files will be overwritten:
+   - metadata.opf
+   - cover.jpg
+```
+
+#### **File Overwriting**
+- 📝 Metadata files (`.opf`, `.txt`, `.json`) are updated with new information
+- 🖼️ Cover images are replaced with higher quality versions
+- ⚠️ Clear warnings before any overwriting occurs
+- ✅ Use `--dry-run` to preview changes first
 
 ---
 
@@ -357,8 +385,8 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 ## 📞 Support
 
-- 🐛 **Bugs**: [GitHub Issues](https://github.com/your-username/AudioSort/issues)
-- 💡 **Suggestions**: [GitHub Discussions](https://github.com/your-username/AudioSort/discussions)
+- 🐛 **Bugs**: [GitHub Issues](https://github.com/lxwiq/AudioSort/issues)
+- 💡 **Suggestions**: [GitHub Discussions](https://github.com/lxwiq/AudioSort/discussions)
 - 📧 **Email**: your-email@example.com
 
 ---

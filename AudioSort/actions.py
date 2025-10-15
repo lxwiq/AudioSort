@@ -17,7 +17,10 @@ AUDIO_EXTENSIONS = {".mp3", ".m4b", ".m4a", ".ogg", ".flac", ".wma"}
 
 def prepare_output(metadata: BookMetadata, plan: ProcessingPlan) -> Path:
     author_folder = _slugify(metadata.primary_author()) or "_unknown_"
-    title_folder = _slugify(metadata.title or plan.source_folder.name)
+
+    # Smart grouping for series
+    title_folder = _get_smart_title_folder(metadata, plan)
+
     destination = plan.destination_root / author_folder / title_folder
     if plan.dry_run:
         return destination
@@ -25,15 +28,83 @@ def prepare_output(metadata: BookMetadata, plan: ProcessingPlan) -> Path:
     return destination
 
 
+def _get_smart_title_folder(metadata: BookMetadata, plan: ProcessingPlan) -> str:
+    """
+    Smart title folder generation that groups series books together.
+
+    Examples:
+    - Harry Potter #1 + Harry Potter #2 → "Harry_Potter_Series"
+    - Standalone book → "Book_Title"
+    """
+
+    # If it's part of a series, create a series folder
+    if metadata.series and metadata.series_position:
+        series_name = _slugify(metadata.series)
+
+        # Check if there are already other books from this series
+        author_folder = _slugify(metadata.primary_author()) or "_unknown_"
+        existing_series_folders = _find_existing_series_folders(plan.destination_root / author_folder, series_name)
+
+        if existing_series_folders:
+            # Use the existing series folder name
+            return existing_series_folders[0]
+        else:
+            # Create a new series folder
+            return f"{series_name}_Series"
+
+    # For standalone books, use the title
+    return _slugify(metadata.title or plan.source_folder.name)
+
+
+def _find_existing_series_folders(base_path: Path, series_name: str) -> list[str]:
+    """Find existing folders that contain books from the same series."""
+    if not base_path.exists():
+        return []
+
+    existing_folders = []
+    for folder in base_path.iterdir():
+        if folder.is_dir():
+            # Check if folder name suggests it's from this series
+            if series_name.lower() in folder.name.lower() or "series" in folder.name.lower():
+                existing_folders.append(folder.name)
+
+    return sorted(existing_folders)
+
+
 def relocate_source(metadata: BookMetadata, plan: ProcessingPlan, destination: Path) -> None:
     if plan.dry_run:
         return
+
+    # Check if destination already exists and has content
+    if destination.exists() and any(destination.iterdir()):
+        print(f"📁 Adding to existing folder: {destination}")
+
+        # Check for potential conflicts
+        existing_files = {f.name for f in destination.rglob("*") if f.is_file()}
+        source_files = {f.name for f in plan.source_folder.rglob("*") if f.is_file()}
+        conflicts = existing_files & source_files
+
+        if conflicts:
+            print(f"⚠️  {len(conflicts)} files will be overwritten:")
+            for conflict in sorted(list(conflicts)[:5]):  # Show max 5 conflicts
+                print(f"   - {conflict}")
+            if len(conflicts) > 5:
+                print(f"   ... and {len(conflicts) - 5} more files")
+            print()
+
+    # Always use copytree with dirs_exist_ok=True to merge contents
     if plan.copy:
+        print(f"📋 Copying to: {destination}")
         shutil.copytree(plan.source_folder, destination, dirs_exist_ok=True)
     else:
+        print(f"📋 Moving to: {destination}")
+        # Try to move first
         try:
             plan.source_folder.rename(destination)
-        except OSError:
+        except OSError as e:
+            print(f"⚠️  Cannot move folder (destination exists): {e}")
+            print(f"📋 Merging contents instead...")
+            # Copy contents then remove source
             shutil.copytree(plan.source_folder, destination, dirs_exist_ok=True)
             shutil.rmtree(plan.source_folder, ignore_errors=True)
 
@@ -71,6 +142,11 @@ def write_opf(destination: Path, metadata: BookMetadata, template_path: Path, dr
         return
     if not template_path.is_file():
         return
+
+    opf_file = destination / "metadata.opf"
+    if opf_file.exists():
+        print(f"📝 metadata.opf already exists, updating with new metadata...")
+
     content = template_path.read_text(encoding="utf-8")
     replacements = {
         "__AUTHOR__": metadata.primary_author(),
@@ -88,7 +164,7 @@ def write_opf(destination: Path, metadata: BookMetadata, template_path: Path, dr
     }
     for placeholder, value in replacements.items():
         content = content.replace(placeholder, value or "")
-    (destination / "metadata.opf").write_text(content, encoding="utf-8")
+    opf_file.write_text(content, encoding="utf-8")
 
 
 def write_info(destination: Path, metadata: BookMetadata, dry_run: bool) -> None:
@@ -96,24 +172,39 @@ def write_info(destination: Path, metadata: BookMetadata, dry_run: bool) -> None
         return
     if not metadata.summary:
         return
-    (destination / "info.txt").write_text(metadata.summary, encoding="utf-8")
+
+    info_file = destination / "info.txt"
+    if info_file.exists():
+        print(f"📝 info.txt already exists, updating with new metadata...")
+
+    info_file.write_text(metadata.summary, encoding="utf-8")
 
 
 def write_json(destination: Path, metadata: BookMetadata, dry_run: bool) -> None:
     if dry_run:
         return
-    (destination / "metadata.json").write_text(json.dumps(metadata.as_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
+
+    json_file = destination / "metadata.json"
+    if json_file.exists():
+        print(f"📝 metadata.json already exists, updating with new metadata...")
+
+    json_file.write_text(json.dumps(metadata.as_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def download_cover(destination: Path, metadata: BookMetadata, session: requests.Session, dry_run: bool) -> None:
     if dry_run or not metadata.cover_url:
         return
+
     response = session.get(metadata.cover_url, headers={"user-agent": USER_AGENT}, timeout=20)
     if not response.ok:
         return
     suffix = _guess_extension(response.headers.get("content-type", ""))
-    filename = destination / f"cover{suffix}"
-    filename.write_bytes(response.content)
+    cover_file = destination / f"cover{suffix}"
+
+    if cover_file.exists():
+        print(f"🖼️  Cover file already exists, updating with new cover...")
+
+    cover_file.write_bytes(response.content)
 
 
 def clean_title(value: str) -> str:

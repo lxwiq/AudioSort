@@ -58,6 +58,7 @@ show_help() {
     echo "  --no-scan              Ne pas scanner les sous-dossiers"
     echo "  --no-auto              Ne pas chercher les métadonnées automatiquement"
     echo "  --dry-run              Mode preview (test)"
+    echo "  --skip-existing        Skip folders that already exist in output"
     echo ""
     echo -e "${YELLOW}Exemples:${NC}"
     echo "  $0 '/Users/Moi/Mes Audiobooks'"
