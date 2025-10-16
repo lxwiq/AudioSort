@@ -8,6 +8,7 @@ from typing import Iterable
 
 import requests
 
+from .config import AudioSortConfig
 from .metadata_sources import USER_AGENT
 from .models import BookMetadata, ProcessingPlan
 
@@ -15,11 +16,18 @@ from .models import BookMetadata, ProcessingPlan
 AUDIO_EXTENSIONS = {".mp3", ".m4b", ".m4a", ".ogg", ".flac", ".wma"}
 
 
-def prepare_output(metadata: BookMetadata, plan: ProcessingPlan) -> Path:
-    author_folder = _slugify(metadata.primary_author()) or "_unknown_"
+def prepare_output(metadata: BookMetadata, plan: ProcessingPlan, config: AudioSortConfig | None = None) -> Path:
+    """
+    Prépare la destination en utilisant la configuration et l'algorithme intelligent
+    """
+    if config is None:
+        config = AudioSortConfig()
 
-    # Smart grouping for series
-    title_folder = _get_smart_title_folder(metadata, plan)
+    # Utiliser l'algorithme intelligent pour suggérer la destination
+    author_folder, title_folder = config.suggest_destination_based_on_existing(metadata, plan.destination_root)
+
+    # Apprendre des métadonnées pour améliorer les futures détections
+    config.learn_from_metadata(metadata)
 
     destination = plan.destination_root / author_folder / title_folder
     if plan.dry_run:
@@ -71,40 +79,65 @@ def _find_existing_series_folders(base_path: Path, series_name: str) -> list[str
     return sorted(existing_folders)
 
 
-def relocate_source(metadata: BookMetadata, plan: ProcessingPlan, destination: Path) -> None:
+def relocate_source(metadata: BookMetadata, plan: ProcessingPlan, destination: Path, config: AudioSortConfig | None = None) -> None:
+    """
+    Déplace/copie les fichiers source vers la destination avec gestion intelligente des conflits
+    """
     if plan.dry_run:
         return
 
-    # Check if destination already exists and has content
-    if destination.exists() and any(destination.iterdir()):
-        print(f"📁 Adding to existing folder: {destination}")
+    if config is None:
+        config = AudioSortConfig()
 
-        # Check for potential conflicts
+    # Vérifier si la destination existe déjà et contient des fichiers
+    if destination.exists() and any(destination.iterdir()):
+        print(f"📁 Ajout au dossier existant: {destination}")
+
+        # Analyse des conflits potentiels
         existing_files = {f.name for f in destination.rglob("*") if f.is_file()}
         source_files = {f.name for f in plan.source_folder.rglob("*") if f.is_file()}
         conflicts = existing_files & source_files
 
         if conflicts:
-            print(f"⚠️  {len(conflicts)} files will be overwritten:")
-            for conflict in sorted(list(conflicts)[:5]):  # Show max 5 conflicts
-                print(f"   - {conflict}")
+            print(f"⚠️  {len(conflicts)} fichiers seront mis à jour:")
+            for conflict in sorted(list(conflicts)[:5]):  # Afficher max 5 conflits
+                file_type = "📄 Métadonnées" if conflict.endswith(('.opf', '.txt', '.json')) else "🎵 Audio" if conflict.endswith(tuple(AUDIO_EXTENSIONS)) else "🖼️ Image"
+                print(f"   {file_type} - {conflict}")
             if len(conflicts) > 5:
-                print(f"   ... and {len(conflicts) - 5} more files")
+                print(f"   ... et {len(conflicts) - 5} autres fichiers")
             print()
 
-    # Always use copytree with dirs_exist_ok=True to merge contents
+            # Gestion intelligente des conflits selon la configuration
+            conflict_resolution = config.get_conflict_resolution()
+            if conflict_resolution == "merge":
+                print("🔄 Mode fusion: Les fichiers existants seront mis à jour")
+            elif conflict_resolution == "skip":
+                if config.should_skip_existing_folders():
+                    print("⏭️  Dossier existant, traitement ignoré")
+                    return
+
+    # Afficher les détails de l'opération
+    operation = "📋 Copie" if plan.copy else "📋 Déplacement"
+    print(f"{operation} vers: {destination}")
+
+    # Afficher les informations sur le livre ajouté
+    if metadata.series:
+        print(f"📚 Série: {metadata.series} #{metadata.series_position}")
+    print(f"📖 Titre: {metadata.title}")
+    print(f"✍️  Auteur: {metadata.primary_author()}")
+    print()
+
+    # Toujours utiliser copytree avec dirs_exist_ok=True pour fusionner les contenus
     if plan.copy:
-        print(f"📋 Copying to: {destination}")
         shutil.copytree(plan.source_folder, destination, dirs_exist_ok=True)
     else:
-        print(f"📋 Moving to: {destination}")
-        # Try to move first
+        # Essayer de déplacer d'abord
         try:
             plan.source_folder.rename(destination)
         except OSError as e:
-            print(f"⚠️  Cannot move folder (destination exists): {e}")
-            print(f"📋 Merging contents instead...")
-            # Copy contents then remove source
+            print(f"⚠️  Impossible de déplacer le dossier (destination existe): {e}")
+            print("📋 Fusion du contenu à la place...")
+            # Copier le contenu puis supprimer la source
             shutil.copytree(plan.source_folder, destination, dirs_exist_ok=True)
             shutil.rmtree(plan.source_folder, ignore_errors=True)
 

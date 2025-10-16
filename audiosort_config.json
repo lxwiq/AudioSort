@@ -1,0 +1,21 @@
+{
+  "default_input_folder": "/Users/lolo/Dev/Perso/AudioSort/test_audio",
+  "default_output_folder": "/Users/lolo/Dev/Perso/AudioSort/_AudioSort_output_",
+  "last_used_settings": {
+    "scan": true,
+    "auto": true,
+    "flatten": false,
+    "rename": false,
+    "opf": true,
+    "infotxt": false,
+    "cover": true,
+    "copy": false,
+    "skip_existing_folders": false
+  },
+  "author_mappings": {},
+  "series_mappings": {},
+  "preferred_metadata_source": "both",
+  "auto_create_config": true,
+  "conflict_resolution": "merge",
+  "skip_existing_folders": false
+}

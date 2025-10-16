@@ -20,6 +20,7 @@ from .actions import (
     write_json,
     write_opf,
 )
+from .config import AudioSortConfig
 from .metadata_sources import MetadataError, fetch_metadata, fetch_metadata_by_search
 from .models import BookMetadata, ProcessingPlan
 from .search import auto_search
@@ -33,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="python -m AudioSort",
         description="Organize audiobook folders using web metadata without clipboard dependencies.",
     )
-    parser.add_argument("folders", metavar="folder", nargs="+", help="Audiobook folders to process")
+    parser.add_argument("folders", metavar="folder", nargs="*", help="Audiobook folders to process")
     parser.add_argument("-O", "--output", help="Destination root folder", default="_AudioSort_output_")
     parser.add_argument("-c", "--copy", action="store_true", help="Copy instead of move")
     parser.add_argument("-f", "--flatten", action="store_true", help="Flatten multi-disc folders")
@@ -48,6 +49,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-d", "--dry-run", action="store_true", help="Display actions without modifying files")
     parser.add_argument("--template", default="template.opf", help="Path to OPF template")
     parser.add_argument("--debug", action="store_true", help="Enable debug logs")
+    parser.add_argument("--config", help="Path to configuration file (default: audiosort_config.json)")
+    parser.add_argument("--save-config", action="store_true", help="Save current settings as default")
+    parser.add_argument("--reset-config", action="store_true", help="Reset configuration to defaults")
+    parser.add_argument("--skip-existing", action="store_true", help="Skip folders that already exist in output")
     parser.add_argument("-V", "--version", action="version", version=f"AudioSort {__version__}")
     return parser
 
@@ -57,6 +62,30 @@ def main(argv: Iterable[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO, format="%(levelname)s - %(message)s")
+
+    # Initialiser la configuration
+    config_path = Path(args.config) if args.config else None
+    config = AudioSortConfig(config_path)
+
+    # Gérer les commandes de configuration qui ne nécessitent pas de dossier
+    if args.reset_config:
+        if config_path and config_path.exists():
+            config_path.unlink()
+            print("🗑️  Configuration supprimée")
+        else:
+            print("🗑️  Aucun fichier de configuration trouvé")
+        return 0
+
+    # Vérifier qu'au moins un dossier est spécifié pour les autres commandes
+    if not args.folders:
+        LOG.error("Au moins un dossier doit être spécifié")
+        parser.print_help()
+        return 2
+
+    # Utiliser les valeurs par défaut de la configuration si non spécifiées
+    if not args.output and config.get_default_output_folder():
+        args.output = config.get_default_output_folder()
+        print(f"📁 Dossier de sortie par défaut: {args.output}")
 
     session = requests.Session()
 
@@ -68,10 +97,21 @@ def main(argv: Iterable[str] | None = None) -> int:
         if len(args.folders) != 1:
             LOG.error("Scan mode requires exactly one folder to scan")
             return 2
-        root_folder = Path(args.folders[0]).resolve()
+
+        # Utiliser le dossier d'entrée par défaut si disponible
+        input_folder = args.folders[0]
+        if not input_folder and config.get_default_input_folder():
+            input_folder = config.get_default_input_folder()
+            print(f"📂 Dossier d'entrée par défaut: {input_folder}")
+
+        root_folder = Path(input_folder).resolve()
         if not root_folder.is_dir():
             LOG.error("Folder does not exist: %s", root_folder)
             return 2
+
+        # Sauvegarder le dossier d'entrée pour la prochaine fois
+        config.set_default_input_folder(str(root_folder))
+
         folders = scan_for_audiobooks(root_folder)
     else:
         folders = [Path(folder).resolve() for folder in args.folders]
@@ -79,6 +119,23 @@ def main(argv: Iterable[str] | None = None) -> int:
             if not folder.is_dir():
                 LOG.error("Folder does not exist: %s", folder)
                 return 2
+
+    # Sauvegarder les paramètres actuels si demandé
+    if args.save_config:
+        settings = {
+            "scan": args.scan,
+            "auto": args.auto,
+            "flatten": args.flatten,
+            "rename": args.rename,
+            "opf": args.opf,
+            "infotxt": args.infotxt,
+            "cover": args.cover,
+            "copy": args.copy,
+            "skip_existing_folders": args.skip_existing
+        }
+        config.save_last_settings(settings)
+        config.set_default_output_folder(str(destination_root))
+        print("💾 Paramètres sauvegardés dans la configuration")
 
     successes: list[str] = []
     failures: list[str] = []
@@ -130,14 +187,20 @@ def main(argv: Iterable[str] | None = None) -> int:
                 continue
 
         enrich_with_id3_defaults(metadata, folder)
-        destination = prepare_output(metadata, plan)
+        destination = prepare_output(metadata, plan, config)
         LOG.info("Destination: %s", destination)
+
+        # Vérifier s'il faut sauter les dossiers existants
+        if args.skip_existing and destination.exists() and any(destination.iterdir()):
+            LOG.info("Skipping existing folder: %s", destination)
+            skipped.append(f"{folder.name} (already exists)")
+            continue
 
         if plan.dry_run:
             successes.append(f"(dry-run) {folder.name}")
             continue
 
-        relocate_source(metadata, plan, destination)
+        relocate_source(metadata, plan, destination, config)
         if plan.flatten:
             flatten(destination, metadata, plan.dry_run)
         if plan.rename_tracks:

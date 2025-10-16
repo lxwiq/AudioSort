@@ -58,7 +58,9 @@ show_help() {
     echo "  --no-scan              Ne pas scanner les sous-dossiers"
     echo "  --no-auto              Ne pas chercher les métadonnées automatiquement"
     echo "  --dry-run              Mode preview (test)"
-    echo "  --skip-existing        Skip folders that already exist in output"
+    echo "  --skip-existing        Ignorer les dossiers déjà existants"
+    echo "  --save-config          Sauvegarder les paramètres par défaut"
+    echo "  --reset-config         Réinitialiser la configuration"
     echo ""
     echo -e "${YELLOW}Exemples:${NC}"
     echo "  $0 '/Users/Moi/Mes Audiobooks'"
@@ -188,6 +190,18 @@ build_command() {
         args="$args --debug"
     fi
 
+    if [ "$SKIP_EXISTING" = "true" ]; then
+        args="$args --skip-existing"
+    fi
+
+    if [ "$SAVE_CONFIG" = "true" ]; then
+        args="$args --save-config"
+    fi
+
+    if [ "$RESET_CONFIG" = "true" ]; then
+        args="$args --reset-config"
+    fi
+
     echo "$cmd $args"
 }
 
@@ -292,6 +306,9 @@ COPY="false"
 DRY_RUN="false"
 DEBUG="false"
 VERBOSE="false"
+SKIP_EXISTING="false"
+SAVE_CONFIG="false"
+RESET_CONFIG="false"
 
 # Parse command line arguments
 INPUT_DIR=""
@@ -368,6 +385,18 @@ while [[ $# -gt 0 ]]; do
             DRY_RUN="true"
             shift
             ;;
+        --skip-existing)
+            SKIP_EXISTING="true"
+            shift
+            ;;
+        --save-config)
+            SAVE_CONFIG="true"
+            shift
+            ;;
+        --reset-config)
+            RESET_CONFIG="true"
+            shift
+            ;;
         -*)
             echo -e "${RED}❌ Option inconnue: $1${NC}"
             echo -e "${BLUE}Utilisez --help pour voir les options disponibles${NC}"
@@ -411,7 +440,11 @@ validate_input "$INPUT_DIR"
 
 # Convert to absolute path
 INPUT_DIR="$(realpath "$INPUT_DIR")"
-OUTPUT_DIR="$(realpath "$OUTPUT_DIR")"
+if [ -n "$OUTPUT_DIR" ]; then
+    OUTPUT_DIR="$(realpath "$OUTPUT_DIR")"
+else
+    OUTPUT_DIR="$(realpath "$DEFAULT_OUTPUT")"
+fi
 
 # Show configuration
 if [ "$VERBOSE" = "true" ]; then
