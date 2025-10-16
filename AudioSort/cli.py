@@ -63,29 +63,29 @@ def main(argv: Iterable[str] | None = None) -> int:
 
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO, format="%(levelname)s - %(message)s")
 
-    # Initialiser la configuration
+    # Initialize configuration
     config_path = Path(args.config) if args.config else None
     config = AudioSortConfig(config_path)
 
-    # Gérer les commandes de configuration qui ne nécessitent pas de dossier
+    # Handle configuration commands that don't require a folder
     if args.reset_config:
         if config_path and config_path.exists():
             config_path.unlink()
-            print("🗑️  Configuration supprimée")
+            print("🗑️  Configuration deleted")
         else:
-            print("🗑️  Aucun fichier de configuration trouvé")
+            print("🗑️  No configuration file found")
         return 0
 
-    # Vérifier qu'au moins un dossier est spécifié pour les autres commandes
+    # Verify that at least one folder is specified for other commands
     if not args.folders:
-        LOG.error("Au moins un dossier doit être spécifié")
+        LOG.error("At least one folder must be specified")
         parser.print_help()
         return 2
 
-    # Utiliser les valeurs par défaut de la configuration si non spécifiées
+    # Use configuration default values if not specified
     if not args.output and config.get_default_output_folder():
         args.output = config.get_default_output_folder()
-        print(f"📁 Dossier de sortie par défaut: {args.output}")
+        print(f"📁 Default output folder: {args.output}")
 
     session = requests.Session()
 
@@ -98,18 +98,18 @@ def main(argv: Iterable[str] | None = None) -> int:
             LOG.error("Scan mode requires exactly one folder to scan")
             return 2
 
-        # Utiliser le dossier d'entrée par défaut si disponible
+        # Use default input folder if available
         input_folder = args.folders[0]
         if not input_folder and config.get_default_input_folder():
             input_folder = config.get_default_input_folder()
-            print(f"📂 Dossier d'entrée par défaut: {input_folder}")
+            print(f"📂 Default input folder: {input_folder}")
 
         root_folder = Path(input_folder).resolve()
         if not root_folder.is_dir():
             LOG.error("Folder does not exist: %s", root_folder)
             return 2
 
-        # Sauvegarder le dossier d'entrée pour la prochaine fois
+        # Save input folder for next time
         config.set_default_input_folder(str(root_folder))
 
         folders = scan_for_audiobooks(root_folder)
@@ -120,7 +120,7 @@ def main(argv: Iterable[str] | None = None) -> int:
                 LOG.error("Folder does not exist: %s", folder)
                 return 2
 
-    # Sauvegarder les paramètres actuels si demandé
+    # Save current settings if requested
     if args.save_config:
         settings = {
             "scan": args.scan,
@@ -135,7 +135,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         }
         config.save_last_settings(settings)
         config.set_default_output_folder(str(destination_root))
-        print("💾 Paramètres sauvegardés dans la configuration")
+        print("💾 Settings saved to configuration")
 
     successes: list[str] = []
     failures: list[str] = []
@@ -190,7 +190,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         destination = prepare_output(metadata, plan, config)
         LOG.info("Destination: %s", destination)
 
-        # Vérifier s'il faut sauter les dossiers existants
+        # Check if existing folders should be skipped
         if args.skip_existing and destination.exists() and any(destination.iterdir()):
             LOG.info("Skipping existing folder: %s", destination)
             skipped.append(f"{folder.name} (already exists)")
