@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import logging
 import sys
 from pathlib import Path
 from typing import Iterable
@@ -24,9 +23,7 @@ from .config import AudioSortConfig
 from .metadata_sources import MetadataError, fetch_metadata, fetch_metadata_by_search
 from .models import BookMetadata, ProcessingPlan
 from .search import auto_search
-
-
-LOG = logging.getLogger("audiosort")
+from .logger import logger, LogLevel
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -61,7 +58,13 @@ def main(argv: Iterable[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO, format="%(levelname)s - %(message)s")
+    # Configure logger based on debug flag
+    if args.debug:
+        logger.level = LogLevel.DEBUG
+    else:
+        logger.level = LogLevel.INFO
+
+    logger.show_time = not args.debug  # Show time only in non-debug mode
 
     # Initialize configuration
     config_path = Path(args.config) if args.config else None
@@ -71,21 +74,21 @@ def main(argv: Iterable[str] | None = None) -> int:
     if args.reset_config:
         if config_path and config_path.exists():
             config_path.unlink()
-            print("🗑️  Configuration deleted")
+            logger.success("Configuration deleted")
         else:
-            print("🗑️  No configuration file found")
+            logger.warning("No configuration file found")
         return 0
 
     # Verify that at least one folder is specified for other commands
     if not args.folders:
-        LOG.error("At least one folder must be specified")
+        logger.error("At least one folder must be specified")
         parser.print_help()
         return 2
 
     # Use configuration default values if not specified
     if not args.output and config.get_default_output_folder():
         args.output = config.get_default_output_folder()
-        print(f"📁 Default output folder: {args.output}")
+        logger.info(f"Using default output folder: {args.output}")
 
     session = requests.Session()
 
@@ -95,18 +98,18 @@ def main(argv: Iterable[str] | None = None) -> int:
     # Handle scan mode
     if args.scan:
         if len(args.folders) != 1:
-            LOG.error("Scan mode requires exactly one folder to scan")
+            logger.error("Scan mode requires exactly one folder to scan")
             return 2
 
         # Use default input folder if available
         input_folder = args.folders[0]
         if not input_folder and config.get_default_input_folder():
             input_folder = config.get_default_input_folder()
-            print(f"📂 Default input folder: {input_folder}")
+            logger.info(f"Using default input folder: {input_folder}")
 
         root_folder = Path(input_folder).resolve()
         if not root_folder.is_dir():
-            LOG.error("Folder does not exist: %s", root_folder)
+            logger.error(f"Folder does not exist: {root_folder}")
             return 2
 
         # Save input folder for next time
@@ -117,7 +120,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         folders = [Path(folder).resolve() for folder in args.folders]
         for folder in folders:
             if not folder.is_dir():
-                LOG.error("Folder does not exist: %s", folder)
+                logger.error(f"Folder does not exist: {folder}")
                 return 2
 
     # Save current settings if requested
@@ -135,14 +138,14 @@ def main(argv: Iterable[str] | None = None) -> int:
         }
         config.save_last_settings(settings)
         config.set_default_output_folder(str(destination_root))
-        print("💾 Settings saved to configuration")
+        logger.success("Settings saved to configuration")
 
     successes: list[str] = []
     failures: list[str] = []
     skipped: list[str] = []
 
     for folder in folders:
-        LOG.info("Processing %s", folder)
+        logger.info(f"Processing {folder}")
         plan = ProcessingPlan(
             source_folder=folder,
             destination_root=destination_root,
@@ -161,38 +164,38 @@ def main(argv: Iterable[str] | None = None) -> int:
             # Try to fetch metadata from APIs directly by search term
             if args.auto or args.scan:
                 search_term = infer_search_term(folder)
-                LOG.info("Searching metadata APIs for %s", folder.name)
+                logger.info(f"Searching metadata APIs for {folder.name}")
                 metadata = fetch_metadata_by_search(search_term, session)
                 if metadata:
-                    LOG.info("Found metadata via API search for %s", folder.name)
+                    logger.success(f"Found metadata via API search for {folder.name}")
                 else:
                     # Use fallback metadata if everything fails
                     if args.scan:
-                        LOG.info("Using fallback metadata for %s", folder.name)
+                        logger.info(f"Using fallback metadata for {folder.name}")
                         metadata = create_fallback_metadata(folder)
                     else:
-                        LOG.warning("No metadata found, skipping %s", folder.name)
+                        logger.warning(f"No metadata found, skipping {folder.name}")
                         skipped.append(folder.name)
                         continue
             else:
-                LOG.warning("No metadata selected, skipping %s", folder.name)
+                logger.warning(f"No metadata selected, skipping {folder.name}")
                 skipped.append(folder.name)
                 continue
         else:
             try:
                 metadata = fetch_metadata(metadata_url, session)
             except MetadataError as exc:
-                LOG.error("%s", exc)
+                logger.error(str(exc))
                 failures.append(f"{folder.name}: {exc}")
                 continue
 
         enrich_with_id3_defaults(metadata, folder)
         destination = prepare_output(metadata, plan, config)
-        LOG.info("Destination: %s", destination)
+        logger.info(f"Destination: {destination}")
 
         # Check if existing folders should be skipped
         if args.skip_existing and destination.exists() and any(destination.iterdir()):
-            LOG.info("Skipping existing folder: %s", destination)
+            logger.info(f"Skipping existing folder: {destination}")
             skipped.append(f"{folder.name} (already exists)")
             continue
 
@@ -226,19 +229,19 @@ def obtain_metadata_url(folder: Path, session: requests.Session, site: str, auto
         candidates = auto_search(search_term, site, session)
         if candidates:
             if not scan_mode:
-                print(f"Selected {candidates[0]} from automatic search")
+                logger.success(f"Selected {candidates[0]} from automatic search")
             else:
-                LOG.info("Auto-selected metadata for %s", folder.name)
+                logger.info(f"Auto-selected metadata for {folder.name}")
             return candidates[0]
         else:
             if not scan_mode:
-                print(f"No automatic results found for {folder.name}")
+                logger.warning(f"No automatic results found for {folder.name}")
             else:
-                LOG.info("No automatic results found for %s", folder.name)
+                logger.info(f"No automatic results found for {folder.name}")
 
     # In scan mode without auto (or auto failed), we can't ask for input, so skip
     if scan_mode:
-        LOG.warning("Skipping %s - automatic search failed, use --auto with --scan for automatic processing", folder.name)
+        logger.warning(f"Skipping {folder.name} - automatic search failed, use --auto with --scan for automatic processing")
         return None
 
     print(f"Folder: {folder.name}")
@@ -280,7 +283,7 @@ def scan_for_audiobooks(root_path: Path) -> list[Path]:
     audio_extensions = {".mp3", ".m4a", ".m4b", ".wma", ".flac", ".ogg"}
     audiobook_folders = []
 
-    LOG.info("Scanning for audiobook folders in: %s", root_path)
+    logger.info(f"Scanning for audiobook folders in: {root_path}")
 
     for folder in root_path.rglob("*"):
         if not folder.is_dir():
@@ -308,9 +311,9 @@ def scan_for_audiobooks(root_path: Path) -> list[Path]:
             # Only add if parent doesn't have audio (this is the top-level folder with audio)
             if not parent_has_audio:
                 audiobook_folders.append(folder)
-                LOG.debug("Found audiobook folder: %s", folder)
+                logger.debug(f"Found audiobook folder: {folder}")
 
-    LOG.info("Found %d audiobook folders", len(audiobook_folders))
+    logger.info(f"Found {len(audiobook_folders)} audiobook folders")
     return audiobook_folders
 
 

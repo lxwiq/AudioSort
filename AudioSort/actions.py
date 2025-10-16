@@ -91,7 +91,7 @@ def relocate_source(metadata: BookMetadata, plan: ProcessingPlan, destination: P
 
     # Check if destination already exists and contains files
     if destination.exists() and any(destination.iterdir()):
-        print(f"📁 Adding to existing folder: {destination}")
+        print(f"FOLDER: Adding to existing folder: {destination}")
 
         # Analyze potential conflicts
         existing_files = {f.name for f in destination.rglob("*") if f.is_file()}
@@ -99,9 +99,9 @@ def relocate_source(metadata: BookMetadata, plan: ProcessingPlan, destination: P
         conflicts = existing_files & source_files
 
         if conflicts:
-            print(f"⚠️  {len(conflicts)} files will be updated:")
+            print(f"WARNING: {len(conflicts)} files will be updated:")
             for conflict in sorted(list(conflicts)[:5]):  # Show max 5 conflicts
-                file_type = "📄 Metadata" if conflict.endswith(('.opf', '.txt', '.json')) else "🎵 Audio" if conflict.endswith(tuple(AUDIO_EXTENSIONS)) else "🖼️ Image"
+                file_type = "Metadata" if conflict.endswith(('.opf', '.txt', '.json')) else "Audio" if conflict.endswith(tuple(AUDIO_EXTENSIONS)) else "Image"
                 print(f"   {file_type} - {conflict}")
             if len(conflicts) > 5:
                 print(f"   ... and {len(conflicts) - 5} other files")
@@ -110,21 +110,21 @@ def relocate_source(metadata: BookMetadata, plan: ProcessingPlan, destination: P
             # Intelligent conflict management according to configuration
             conflict_resolution = config.get_conflict_resolution()
             if conflict_resolution == "merge":
-                print("🔄 Merge mode: Existing files will be updated")
+                print("MERGE: Existing files will be updated")
             elif conflict_resolution == "skip":
                 if config.should_skip_existing_folders():
-                    print("⏭️  Existing folder, processing ignored")
+                    print("SKIP: Existing folder, processing ignored")
                     return
 
     # Show operation details
-    operation = "📋 Copy" if plan.copy else "📋 Move"
+    operation = "COPY" if plan.copy else "MOVE"
     print(f"{operation} to: {destination}")
 
     # Show information about the book being added
     if metadata.series:
-        print(f"📚 Series: {metadata.series} #{metadata.series_position}")
-    print(f"📖 Title: {metadata.title}")
-    print(f"✍️  Author: {metadata.primary_author()}")
+        print(f"SERIES: {metadata.series} #{metadata.series_position}")
+    print(f"TITLE: {metadata.title}")
+    print(f"AUTHOR: {metadata.primary_author()}")
     print()
 
     # Always use copytree with dirs_exist_ok=True to merge contents
@@ -135,8 +135,8 @@ def relocate_source(metadata: BookMetadata, plan: ProcessingPlan, destination: P
         try:
             plan.source_folder.rename(destination)
         except OSError as e:
-            print(f"⚠️  Unable to move folder (destination exists): {e}")
-            print("📋 Merging content instead...")
+            print(f"WARNING: Unable to move folder (destination exists): {e}")
+            print("MERGE: Merging content instead...")
             # Copy content then delete source
             shutil.copytree(plan.source_folder, destination, dirs_exist_ok=True)
             shutil.rmtree(plan.source_folder, ignore_errors=True)
@@ -178,7 +178,7 @@ def write_opf(destination: Path, metadata: BookMetadata, template_path: Path, dr
 
     opf_file = destination / "metadata.opf"
     if opf_file.exists():
-        print(f"📝 metadata.opf already exists, updating with new metadata...")
+        print(f"METADATA: metadata.opf already exists, updating with new metadata...")
 
     content = template_path.read_text(encoding="utf-8")
     replacements = {
@@ -208,7 +208,7 @@ def write_info(destination: Path, metadata: BookMetadata, dry_run: bool) -> None
 
     info_file = destination / "info.txt"
     if info_file.exists():
-        print(f"📝 info.txt already exists, updating with new metadata...")
+        print(f"METADATA: info.txt already exists, updating with new metadata...")
 
     info_file.write_text(metadata.summary, encoding="utf-8")
 
@@ -219,7 +219,7 @@ def write_json(destination: Path, metadata: BookMetadata, dry_run: bool) -> None
 
     json_file = destination / "metadata.json"
     if json_file.exists():
-        print(f"📝 metadata.json already exists, updating with new metadata...")
+        print(f"METADATA: metadata.json already exists, updating with new metadata...")
 
     json_file.write_text(json.dumps(metadata.as_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -231,7 +231,7 @@ def download_cover(destination: Path, metadata: BookMetadata, session: requests.
     # Validate URL format before making request
     cover_url = metadata.cover_url.strip()
     if not cover_url.startswith(('http://', 'https://')):
-        print(f"⚠️  Invalid cover URL format: {cover_url}")
+        print(f"WARNING: Invalid cover URL format: {cover_url}")
         return
 
     response = session.get(cover_url, headers={"user-agent": USER_AGENT}, timeout=20)
@@ -241,7 +241,7 @@ def download_cover(destination: Path, metadata: BookMetadata, session: requests.
     cover_file = destination / f"cover{suffix}"
 
     if cover_file.exists():
-        print(f"🖼️  Cover file already exists, updating with new cover...")
+        print(f"COVER: Cover file already exists, updating with new cover...")
 
     cover_file.write_bytes(response.content)
 

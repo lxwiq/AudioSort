@@ -26,8 +26,8 @@ class AudioSortConfig:
                 with open(self.config_path, 'r', encoding='utf-8') as f:
                     return json.load(f)
             except (json.JSONDecodeError, IOError) as e:
-                print(f"⚠️  Configuration loading error: {e}")
-                print("📋 Using default configuration")
+                print(f"WARNING: Configuration loading error: {e}")
+                print("CONFIG: Using default configuration")
 
         # Default configuration
         return {
@@ -57,7 +57,7 @@ class AudioSortConfig:
             with open(self.config_path, 'w', encoding='utf-8') as f:
                 json.dump(self._config, f, indent=2, ensure_ascii=False)
         except IOError as e:
-            print(f"⚠️  Configuration save error: {e}")
+            print(f"WARNING: Configuration save error: {e}")
 
     def get_default_input_folder(self) -> str:
         """Get default input folder"""
