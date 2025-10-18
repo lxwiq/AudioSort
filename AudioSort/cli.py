@@ -225,54 +225,24 @@ def main(argv: Iterable[str] | None = None) -> int:
 
 def obtain_metadata_url(folder: Path, session: requests.Session, site: str, auto: bool, scan_mode: bool = False) -> str | None:
     search_term = infer_search_term(folder)
-    if auto:
-        candidates = auto_search(search_term, site, session)
-        if candidates:
-            if not scan_mode:
-                logger.success(f"Selected {candidates[0]} from automatic search")
-            else:
-                logger.info(f"Auto-selected metadata for {folder.name}")
-            return candidates[0]
-        else:
-            if not scan_mode:
-                logger.warning(f"No automatic results found for {folder.name}")
-            else:
-                logger.info(f"No automatic results found for {folder.name}")
 
-    # In scan mode without auto (or auto failed), we can't ask for input, so skip
+    # In scan mode, skip DuckDuckGo and go directly to API search
     if scan_mode:
-        logger.warning(f"Skipping {folder.name} - automatic search failed, use --auto with --scan for automatic processing")
-        return None
+        return None  # Will trigger API search in main loop
 
-    print(f"Folder: {folder.name}")
-    print(f"Suggested search term: {search_term}")
-    print("Enter metadata URL (Audible or Goodreads), type 'search' to list suggestions, or 'skip' to ignore")
-    while True:
-        response = input("> ").strip()
-        if not response:
-            continue
-        if response.lower() == "skip":
-            return None
-        if response.lower() == "search":
-            suggestions = auto_search(search_term, site, session)
-            if not suggestions:
-                print("No results found, paste URL manually or type skip")
-                continue
-            for idx, suggestion in enumerate(suggestions, start=1):
-                print(f"{idx}. {suggestion}")
-            selection = input("Select number or paste URL: ").strip()
-            if selection.isdigit():
-                index = int(selection) - 1
-                if 0 <= index < len(suggestions):
-                    return suggestions[index]
-                print("Invalid selection")
-                continue
-            if selection:
-                return selection
-            continue
-        if response.startswith("http"):
-            return response
-        print("Provide a valid URL, 'search', or 'skip'")
+    if auto:
+        try:
+            candidates = auto_search(search_term, site, session)
+            if candidates:
+                logger.success(f"Selected {candidates[0]} from automatic search")
+                return candidates[0]
+            else:
+                logger.warning(f"No automatic results found for {folder.name}")
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Search engine timeout: {e}. Trying direct API search...")
+
+    # If auto search failed or not in auto mode, skip URL search and let main loop handle API search
+    return None
 
 
 def scan_for_audiobooks(root_path: Path) -> list[Path]:

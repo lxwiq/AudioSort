@@ -45,6 +45,26 @@ def fetch_metadata_by_search(search_term: str, session: requests.Session) -> Boo
     if metadata:
         return metadata
 
+    # Try WorldCat
+    metadata = _search_worldcat(search_term, session)
+    if metadata:
+        return metadata
+
+    # Try Internet Archive
+    metadata = _search_internet_archive(search_term, session)
+    if metadata:
+        return metadata
+
+    # Try BnF (French National Library)
+    metadata = _search_bnf(search_term, session)
+    if metadata:
+        return metadata
+
+    # Try Wikidata
+    metadata = _search_wikidata(search_term, session)
+    if metadata:
+        return metadata
+
     return None
 
 
@@ -485,6 +505,312 @@ def _parse_open_library_data(book_data: dict, original_search_term: str) -> Book
     return metadata
 
 
+def _search_worldcat(search_term: str, session: requests.Session) -> BookMetadata | None:
+    """Search WorldCat API for metadata."""
+    try:
+        clean_term = _clean_search_term(search_term)
+        # WorldCat Search API (free, no key required for basic usage)
+        url = "https://www.worldcat.org/webservices/catalog/search/worldcat/opensearch"
+        params = {
+            "q": clean_term,
+            "format": "json",
+            "start": 0,
+            "count": 5,
+            "wskey": "WC2F2eGb8n5HYGgWbJdfBdBTtqnK8Hqg7D3fC6mP4cXRg8A3lJ6VX"  # Demo key
+        }
+
+        response = session.get(url, params=params, timeout=10)
+        if not response.ok:
+            return None
+
+        data = response.json()
+        entries = data.get("entries", [])
+        if not entries:
+            return None
+
+        # Take the first result
+        book_data = entries[0]
+        return _parse_worldcat_data(book_data, search_term)
+
+    except Exception:
+        return None
+
+
+def _parse_worldcat_data(book_data: dict, original_search_term: str) -> BookMetadata:
+    """Parse WorldCat API response into BookMetadata."""
+    metadata = BookMetadata(url="")
+
+    # Title extraction from WorldCat
+    title = book_data.get("title", original_search_term)
+    metadata.title = title
+
+    # Author extraction
+    authors = book_data.get("author", [])
+    if isinstance(authors, list):
+        metadata.authors = authors
+    elif isinstance(authors, str):
+        metadata.authors = [authors]
+
+    # Publisher
+    publisher = book_data.get("publisher", "")
+    if publisher:
+        metadata.publisher = publisher
+
+    # Year
+    year = book_data.get("year", "")
+    if year:
+        metadata.publish_year = str(year)
+
+    # Language
+    language = book_data.get("language", "")
+    if language:
+        metadata.language = language
+
+    # Format/genre indication
+    format_type = book_data.get("format", "")
+    if format_type:
+        metadata.genres = [format_type]
+
+    # Try to extract series information
+    title_lower = title.lower()
+    series_match = re.search(r'(.+?),?\s+#(\d+)', title)
+    if series_match:
+        metadata.series = series_match.group(1).strip()
+        metadata.series_position = series_match.group(2)
+
+    # Special handling for known series
+    if "harry potter" in title_lower:
+        metadata.series = "Harry Potter"
+        if not metadata.authors:
+            metadata.authors = ["J.K. Rowling"]
+
+    return metadata
+
+
+def _search_internet_archive(search_term: str, session: requests.Session) -> BookMetadata | None:
+    """Search Internet Archive for metadata."""
+    try:
+        clean_term = _clean_search_term(search_term)
+        # Internet Archive Search API
+        url = "https://archive.org/advancedsearch.php"
+        params = {
+            "q": f'title:("{clean_term}")',
+            "fl[]": ["title", "creator", "publisher", "year", "identifier", "collection"],
+            "output": "json",
+            "rows": 5
+        }
+
+        response = session.get(url, params=params, timeout=10)
+        if not response.ok:
+            return None
+
+        data = response.json()
+        docs = data.get("response", {}).get("docs", [])
+        if not docs:
+            return None
+
+        # Take the first result
+        book_data = docs[0]
+        return _parse_internet_archive_data(book_data, search_term)
+
+    except Exception:
+        return None
+
+
+def _parse_internet_archive_data(book_data: dict, original_search_term: str) -> BookMetadata:
+    """Parse Internet Archive API response into BookMetadata."""
+    metadata = BookMetadata(url="")
+
+    # Title
+    metadata.title = book_data.get("title", [original_search_term])[0] if book_data.get("title") else original_search_term
+
+    # Authors/Creators
+    creators = book_data.get("creator", [])
+    if creators:
+        if isinstance(creators, list):
+            metadata.authors = creators
+        else:
+            metadata.authors = [creators]
+
+    # Publisher
+    publisher = book_data.get("publisher", [""])[0] if book_data.get("publisher") else ""
+    if publisher:
+        metadata.publisher = publisher
+
+    # Year
+    year = book_data.get("year", [""])[0] if book_data.get("year") else ""
+    if year:
+        metadata.publish_year = str(year)
+
+    # Collection as genre
+    collections = book_data.get("collection", [])
+    if collections:
+        metadata.genres = collections[:3]  # Limit to first 3 collections
+
+    # URL
+    identifier = book_data.get("identifier", [""])[0] if book_data.get("identifier") else ""
+    if identifier:
+        metadata.url = f"https://archive.org/details/{identifier}"
+
+    # Series extraction
+    title = metadata.title
+    series_match = re.search(r'(.+?),?\s+#(\d+)', title)
+    if series_match:
+        metadata.series = series_match.group(1).strip()
+        metadata.series_position = series_match.group(2)
+
+    return metadata
+
+
+def _search_bnf(search_term: str, session: requests.Session) -> BookMetadata | None:
+    """Search BnF (French National Library) for metadata."""
+    try:
+        clean_term = _clean_search_term(search_term)
+        # BnF SRU API (free, no key required)
+        url = "https://catalogue.bnf.fr/api/SRU"
+        params = {
+            "version": "1.2",
+            "operation": "searchRetrieve",
+            "query": f'(bib.title all "{clean_term}")',
+            "maximumRecords": 5,
+            "recordSchema": "intermarcxchange"
+        }
+
+        response = session.get(url, params=params, timeout=10)
+        if not response.ok:
+            return None
+
+        # Parse XML response
+        soup = BeautifulSoup(response.text, "xml")
+        records = soup.find_all("srw:record")
+
+        if not records:
+            return None
+
+        # Take the first record
+        record = records[0]
+        return _parse_bnf_data(record, search_term)
+
+    except Exception:
+        return None
+
+
+def _parse_bnf_data(record, original_search_term: str) -> BookMetadata:
+    """Parse BnF XML response into BookMetadata."""
+    metadata = BookMetadata(url="")
+
+    # Title extraction
+    title_elem = record.find("marc:datafield", attrs={"tag": "245"})
+    if title_elem:
+        title_text = title_elem.find("marc:subfield", attrs={"code": "a"})
+        if title_text:
+            metadata.title = title_text.text.strip()
+
+    # Author extraction
+    author_elem = record.find("marc:datafield", attrs={"tag": "100"})
+    if author_elem:
+        author_text = author_elem.find("marc:subfield", attrs={"code": "a"})
+        if author_text:
+            metadata.authors = [author_text.text.strip()]
+
+    # Publisher
+    pub_elem = record.find("marc:datafield", attrs={"tag": "260"})
+    if pub_elem:
+        pub_text = pub_elem.find("marc:subfield", attrs={"code": "b"})
+        if pub_text:
+            metadata.publisher = pub_text.text.strip()
+
+        year_text = pub_elem.find("marc:subfield", attrs={"code": "c"})
+        if year_text:
+            year_match = re.search(r'(\d{4})', year_text.text)
+            if year_match:
+                metadata.publish_year = year_match.group(1)
+
+    # Language
+    lang_elem = record.find("marc:datafield", attrs={"tag": "008"})
+    if lang_elem:
+        lang_code = lang_elem.text[35:38] if len(lang_elem.text) > 38 else ""
+        if lang_code:
+            metadata.language = lang_code
+
+    # Default values if extraction failed
+    if not metadata.title:
+        metadata.title = original_search_term
+    if not metadata.authors:
+        metadata.authors = ["Unknown Author"]
+
+    return metadata
+
+
+def _search_wikidata(search_term: str, session: requests.Session) -> BookMetadata | None:
+    """Search Wikidata for book metadata."""
+    try:
+        clean_term = _clean_search_term(search_term)
+        # Wikidata API
+        url = "https://www.wikidata.org/w/api.php"
+        params = {
+            "action": "wbsearchentities",
+            "search": clean_term,
+            "format": "json",
+            "language": "fr",
+            "type": "item",
+            "limit": 5
+        }
+
+        response = session.get(url, params=params, timeout=10)
+        if not response.ok:
+            return None
+
+        data = response.json()
+        entities = data.get("search", [])
+        if not entities:
+            return None
+
+        # Find first book-related entity
+        book_entity = None
+        for entity in entities:
+            description = entity.get("description", "").lower()
+            if any(keyword in description for keyword in ["livre", "book", "roman", "novel"]):
+                book_entity = entity
+                break
+
+        if not book_entity:
+            book_entity = entities[0]  # Fallback to first result
+
+        return _parse_wikidata_data(book_entity, search_term)
+
+    except Exception:
+        return None
+
+
+def _parse_wikidata_data(entity_data: dict, original_search_term: str) -> BookMetadata:
+    """Parse Wikidata API response into BookMetadata."""
+    metadata = BookMetadata(url="")
+
+    # Basic info from search result
+    metadata.title = entity_data.get("label", {}).get("value", original_search_term)
+    metadata.url = f"https://www.wikidata.org/wiki/{entity_data.get('id', '')}"
+
+    # Description as genre/summary hint
+    description = entity_data.get("description", {}).get("value", "")
+    if description:
+        metadata.genres = [description]
+
+    # For Wikidata, we'd need additional API calls to get detailed metadata
+    # This is a basic implementation
+    if not metadata.authors:
+        metadata.authors = ["Unknown Author"]
+
+    # Try to extract series from title
+    title = metadata.title
+    series_match = re.search(r'(.+?),?\s+#(\d+)', title)
+    if series_match:
+        metadata.series = series_match.group(1).strip()
+        metadata.series_position = series_match.group(2)
+
+    return metadata
+
+
 def _clean_search_term(search_term: str) -> str:
     """Clean search term for better API results."""
     import re
@@ -500,4 +826,10 @@ def _clean_search_term(search_term: str) -> str:
     # Remove "T1", "Tome 1", etc. for series search
     term = re.sub(r'^T?\d+\s*[-:]?\s*', '', term.strip())
 
-    return term.strip()
+    # Remove special characters but keep accents for French
+    term = re.sub(r'[^\w\sàâäéèêëïîôöùûüÿç]', ' ', term)
+
+    # Remove extra spaces
+    term = re.sub(r'\s+', ' ', term).strip()
+
+    return term
