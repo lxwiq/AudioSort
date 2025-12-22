@@ -2,6 +2,7 @@ package cache
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"audiosort/pkg/models"
@@ -92,7 +93,7 @@ func (s *Store) SetMetadata(query string, metadata models.BookMetadata) error {
 	return s.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(metadataBucket)
 		if b == nil {
-			return nil
+			return fmt.Errorf("metadata bucket not found")
 		}
 		data, err := json.Marshal(cached)
 		if err != nil {
@@ -128,7 +129,7 @@ func (s *Store) MarkProcessed(sourcePath, destPath, checksum string) error {
 	return s.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(processedBucket)
 		if b == nil {
-			return nil
+			return fmt.Errorf("processed bucket not found")
 		}
 		data, err := json.Marshal(processed)
 		if err != nil {
