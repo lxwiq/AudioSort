@@ -117,11 +117,9 @@ func (s *Scanner) analyzeDirectory(ctx context.Context, dirPath string) *models.
 	}
 
 	var audioFiles []models.AudioFile
-	hasSubdirs := false
 
 	for _, entry := range entries {
 		if entry.IsDir() {
-			hasSubdirs = true
 			continue
 		}
 
