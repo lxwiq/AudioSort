@@ -29,12 +29,11 @@ type CacheModel struct {
 }
 
 type cacheStats struct {
-	path     string
-	exists   bool
-	size     int64
-	sizeStr  string
-	modTime  string
-	entries  int
+	path    string
+	exists  bool
+	size    int64
+	sizeStr string
+	modTime string
 }
 
 // cacheCleared message

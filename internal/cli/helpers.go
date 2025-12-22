@@ -2,31 +2,11 @@ package cli
 
 import (
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 
 	"audiosort/internal/config"
-	"audiosort/internal/metadata"
 )
-
-// initMetadataSources creates metadata sources based on configuration
-func initMetadataSources(cfg *config.Config) []metadata.MetadataSource {
-	var sources []metadata.MetadataSource
-	httpClient := &http.Client{}
-
-	for _, sourceName := range cfg.Sources {
-		switch sourceName {
-		case "googlebooks":
-			sources = append(sources, metadata.NewGoogleBooks(httpClient))
-		case "openlibrary":
-			sources = append(sources, metadata.NewOpenLibrary(httpClient))
-		// TODO: Add other sources (audible, bnf, etc.)
-		}
-	}
-
-	return sources
-}
 
 // loadConfig loads the configuration from file or returns default
 func loadConfig() (*config.Config, error) {

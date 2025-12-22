@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"audiosort/internal/core"
-	"audiosort/internal/metadata"
 	"audiosort/pkg/models"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -27,37 +26,6 @@ func scanCmd(path string, scanner *core.Scanner) tea.Cmd {
 		}
 
 		return scanCompleteMsg{books: books}
-	}
-}
-
-// fetchMetadataCmd fetches metadata for a single audiobook
-func fetchMetadataCmd(index int, book *models.Audiobook, fetcher *metadata.Fetcher) tea.Cmd {
-	return func() tea.Msg {
-		ctx := context.Background()
-
-		// Infer search query from folder name
-		query := book.Path
-		if book.Path != "" {
-			// Use just the last component of the path
-			parts := []rune(book.Path)
-			lastSlash := -1
-			for i := len(parts) - 1; i >= 0; i-- {
-				if parts[i] == '/' {
-					lastSlash = i
-					break
-				}
-			}
-			if lastSlash >= 0 && lastSlash < len(parts)-1 {
-				query = string(parts[lastSlash+1:])
-			}
-		}
-
-		metadata, err := fetcher.Fetch(ctx, query)
-		if err != nil {
-			return metadataFetchedMsg{index: index, err: err}
-		}
-
-		return metadataFetchedMsg{index: index, metadata: metadata}
 	}
 }
 

@@ -15,9 +15,6 @@ type metadataFetchedMsg struct {
 	err      error
 }
 
-// processStartMsg is sent when processing begins
-type processStartMsg struct{}
-
 // processProgressMsg is sent to update processing progress
 type processProgressMsg struct {
 	current int
@@ -28,12 +25,6 @@ type processProgressMsg struct {
 type processCompleteMsg struct {
 	summary *models.Summary
 	err     error
-}
-
-// bookProcessedMsg is sent when a single book has been processed
-type bookProcessedMsg struct {
-	index  int
-	result models.Result
 }
 
 // errorMsg wraps an error
