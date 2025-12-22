@@ -45,9 +45,9 @@ type Model struct {
 	showHelp bool
 
 	// Processing state
-	progress    float64
+	progress       float64
 	processedCount int
-	summary     *models.Summary
+	summary        *models.Summary
 
 	// UI components
 	spinner spinner.Model

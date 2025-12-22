@@ -23,10 +23,10 @@ func NewOPFWriter(basePath string) *OPFWriter {
 
 // OPF XML structure
 type OPFPackage struct {
-	XMLName  xml.Name     `xml:"package"`
-	Version  string       `xml:"version,attr"`
-	Xmlns    string       `xml:"xmlns,attr"`
-	Metadata OPFMetadata  `xml:"metadata"`
+	XMLName  xml.Name    `xml:"package"`
+	Version  string      `xml:"version,attr"`
+	Xmlns    string      `xml:"xmlns,attr"`
+	Metadata OPFMetadata `xml:"metadata"`
 }
 
 type OPFMetadata struct {

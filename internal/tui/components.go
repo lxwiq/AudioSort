@@ -144,7 +144,7 @@ func Alert(alertType, message string) string {
 	}
 
 	return BoxStyle.BorderForeground(style.GetForeground()).Render(
-		style.Render(icon+" "+message),
+		style.Render(icon + " " + message),
 	)
 }
 

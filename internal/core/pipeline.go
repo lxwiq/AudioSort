@@ -17,15 +17,15 @@ type Writer interface {
 
 // PipelineOptions configures the pipeline execution
 type PipelineOptions struct {
-	SourcePath  string
-	DestPath    string
-	Pattern     Pattern
-	Workers     int
-	CopyMode    bool
-	SkipExist   bool
-	DryRun      bool
-	Fetcher     *metadata.Fetcher
-	Writers     []Writer
+	SourcePath string
+	DestPath   string
+	Pattern    Pattern
+	Workers    int
+	CopyMode   bool
+	SkipExist  bool
+	DryRun     bool
+	Fetcher    *metadata.Fetcher
+	Writers    []Writer
 }
 
 // Pipeline orchestrates the entire audiobook processing workflow
