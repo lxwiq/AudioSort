@@ -28,17 +28,17 @@ func (b BookMetadata) PrimaryAuthor() string {
 }
 
 type Audiobook struct {
-	Path     string
-	Files    []AudioFile
-	Metadata *BookMetadata
-	Status   Status
-	Error    error
+	Path     string         `json:"path"`
+	Files    []AudioFile    `json:"files"`
+	Metadata *BookMetadata  `json:"metadata,omitempty"`
+	Status   Status         `json:"status"`
+	Error    error          `json:"error,omitempty"`
 }
 
 type AudioFile struct {
-	Path     string
-	Size     int64
-	Duration time.Duration
+	Path     string        `json:"path"`
+	Size     int64         `json:"size"`
+	Duration time.Duration `json:"duration"`
 }
 
 type Status string

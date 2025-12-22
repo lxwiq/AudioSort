@@ -30,6 +30,6 @@ type Summary struct {
 }
 
 func (s Summary) String() string {
-	return fmt.Sprintf("✓ %d processed | ○ %d skipped | ✗ %d errors",
+	return fmt.Sprintf("[OK] %d processed | [-] %d skipped | [ERR] %d errors",
 		s.Processed, s.Skipped, s.Errors)
 }
