@@ -255,8 +255,15 @@ func (m *menuRunner) executeAction(action string) tea.Cmd {
 
 		switch action {
 		case "Scan":
-			// For scan, we need a path - show a simple prompt or use current dir
-			err = Run(".", m.config)
+			// Ask for path first
+			path, confirmed, pathErr := RunPathInput("Scan Audiobooks", "Enter path to audiobooks...", "")
+			if pathErr != nil {
+				return errorMsg{err: pathErr}
+			}
+			if !confirmed {
+				return nil // Cancelled, return to menu
+			}
+			err = Run(path, m.config)
 		case "Search":
 			err = RunSearch("", m.config)
 		case "Config":
