@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -29,15 +30,23 @@ func DefaultConfig() *Config {
 	}
 }
 
-func configPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "audiosort", "config.yaml")
+func configPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get user home directory: %w", err)
+	}
+	return filepath.Join(home, ".config", "audiosort", "config.yaml"), nil
 }
 
 func Load() (*Config, error) {
 	cfg := DefaultConfig()
 
-	data, err := os.ReadFile(configPath())
+	path, err := configPath()
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return cfg, nil
@@ -53,7 +62,10 @@ func Load() (*Config, error) {
 }
 
 func (c *Config) Save() error {
-	path := configPath()
+	path, err := configPath()
+	if err != nil {
+		return err
+	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
