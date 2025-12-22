@@ -15,9 +15,12 @@ var (
 
 type Result struct {
 	Audiobook *Audiobook
-	Success   bool
 	Error     error
 	Duration  time.Duration
+}
+
+func (r Result) Success() bool {
+	return r.Error == nil
 }
 
 type Summary struct {

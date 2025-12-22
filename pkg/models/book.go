@@ -2,6 +2,8 @@ package models
 
 import "time"
 
+const UnknownAuthor = "_unknown_"
+
 type BookMetadata struct {
 	Title          string   `json:"title"`
 	Authors        []string `json:"authors"`
@@ -24,15 +26,22 @@ func (b BookMetadata) PrimaryAuthor() string {
 	if len(b.Authors) > 0 {
 		return b.Authors[0]
 	}
-	return "_unknown_"
+	return UnknownAuthor
+}
+
+func (b BookMetadata) PrimaryNarrator() string {
+	if len(b.Narrators) > 0 {
+		return b.Narrators[0]
+	}
+	return ""
 }
 
 type Audiobook struct {
-	Path     string         `json:"path"`
-	Files    []AudioFile    `json:"files"`
-	Metadata *BookMetadata  `json:"metadata,omitempty"`
-	Status   Status         `json:"status"`
-	Error    error          `json:"error,omitempty"`
+	Path     string        `json:"path"`
+	Files    []AudioFile   `json:"files"`
+	Metadata *BookMetadata `json:"metadata,omitempty"`
+	Status   Status        `json:"status"`
+	Error    string        `json:"error,omitempty"`
 }
 
 type AudioFile struct {
