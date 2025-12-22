@@ -40,13 +40,16 @@ func (w *JSONWriter) Write(ctx context.Context, book *models.Audiobook, destPath
 		return fmt.Errorf("failed to marshal JSON: %w", err)
 	}
 
+	// Build full destination path
+	fullPath := filepath.Join(w.basePath, destPath)
+
 	// Create destination directory if needed
-	if err := os.MkdirAll(destPath, 0755); err != nil {
+	if err := os.MkdirAll(fullPath, 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
 	// Write to file
-	jsonPath := filepath.Join(destPath, "metadata.json")
+	jsonPath := filepath.Join(fullPath, "metadata.json")
 	if err := os.WriteFile(jsonPath, jsonData, 0644); err != nil {
 		return fmt.Errorf("failed to write JSON file: %w", err)
 	}

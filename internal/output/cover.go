@@ -68,13 +68,16 @@ func (w *CoverWriter) Write(ctx context.Context, book *models.Audiobook, destPat
 		return fmt.Errorf("failed to download cover: HTTP %d", resp.StatusCode)
 	}
 
+	// Build full destination path
+	fullPath := filepath.Join(w.basePath, destPath)
+
 	// Create destination directory if needed
-	if err := os.MkdirAll(destPath, 0755); err != nil {
+	if err := os.MkdirAll(fullPath, 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
 	// Create the cover file
-	coverPath := filepath.Join(destPath, "cover.jpg")
+	coverPath := filepath.Join(fullPath, "cover.jpg")
 	coverFile, err := os.Create(coverPath)
 	if err != nil {
 		return fmt.Errorf("failed to create cover file: %w", err)

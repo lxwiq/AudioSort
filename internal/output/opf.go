@@ -127,13 +127,16 @@ func (w *OPFWriter) Write(ctx context.Context, book *models.Audiobook, destPath 
 	// Add XML declaration
 	xmlContent := []byte(xml.Header + string(output))
 
+	// Build full destination path
+	fullPath := filepath.Join(w.basePath, destPath)
+
 	// Create destination directory if needed
-	if err := os.MkdirAll(destPath, 0755); err != nil {
+	if err := os.MkdirAll(fullPath, 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
 	// Write to file
-	opfPath := filepath.Join(destPath, "metadata.opf")
+	opfPath := filepath.Join(fullPath, "metadata.opf")
 	if err := os.WriteFile(opfPath, xmlContent, 0644); err != nil {
 		return fmt.Errorf("failed to write OPF file: %w", err)
 	}
