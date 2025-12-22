@@ -98,11 +98,12 @@ func (s *Store) IsProcessed(path string) bool {
 	return exists
 }
 
-func (s *Store) MarkProcessed(sourcePath, destPath string) error {
+func (s *Store) MarkProcessed(sourcePath, destPath, checksum string) error {
 	processed := ProcessedBook{
 		SourcePath:  sourcePath,
 		DestPath:    destPath,
 		ProcessedAt: time.Now(),
+		Checksum:    checksum,
 	}
 
 	return s.db.Update(func(tx *bbolt.Tx) error {
