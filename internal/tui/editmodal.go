@@ -1,6 +1,11 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -251,21 +256,136 @@ func (m EditModal) getValue() any {
 }
 
 func (m EditModal) updateText(msg tea.KeyMsg) (EditModal, tea.Cmd) {
-	return m, nil
+	switch msg.String() {
+	case "tab":
+		// Autocomplete for paths
+		if m.isPath {
+			m.autocomplete()
+		}
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
+}
+
+func (m *EditModal) autocomplete() {
+	value := m.textInput.Value()
+	if value == "" {
+		return
+	}
+
+	// Expand ~
+	if len(value) > 0 && value[0] == '~' {
+		if home, err := os.UserHomeDir(); err == nil {
+			value = filepath.Join(home, value[1:])
+		}
+	}
+
+	dir := filepath.Dir(value)
+	prefix := filepath.Base(value)
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasPrefix(name, prefix) {
+			completed := filepath.Join(dir, name)
+			m.textInput.SetValue(completed + string(filepath.Separator))
+			m.textInput.CursorEnd()
+			return
+		}
+	}
 }
 
 func (m EditModal) updateBool(msg tea.KeyMsg) (EditModal, tea.Cmd) {
+	switch msg.String() {
+	case "left", "right", "h", "l", "space":
+		m.boolValue = !m.boolValue
+	}
 	return m, nil
 }
 
 func (m EditModal) updateNumber(msg tea.KeyMsg) (EditModal, tea.Cmd) {
+	switch msg.String() {
+	case "left", "h":
+		if m.numberValue > m.numberMin {
+			m.numberValue--
+		}
+	case "right", "l":
+		if m.numberValue < m.numberMax {
+			m.numberValue++
+		}
+	case "0", "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		// Allow direct number input
+		if n, err := strconv.Atoi(msg.String()); err == nil {
+			newVal := m.numberValue*10 + n
+			if newVal <= m.numberMax {
+				m.numberValue = newVal
+			}
+		}
+	case "backspace":
+		m.numberValue = m.numberValue / 10
+		if m.numberValue < m.numberMin {
+			m.numberValue = m.numberMin
+		}
+	}
 	return m, nil
 }
 
 func (m EditModal) updateSelect(msg tea.KeyMsg) (EditModal, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		if m.selectCursor > 0 {
+			m.selectCursor--
+		}
+	case "down", "j":
+		if m.selectCursor < len(m.selectOptions)-1 {
+			m.selectCursor++
+		}
+	}
 	return m, nil
 }
 
 func (m EditModal) updateMultiSelect(msg tea.KeyMsg) (EditModal, tea.Cmd) {
+	if len(m.multiOrder) == 0 {
+		return m, nil
+	}
+
+	switch msg.String() {
+	case "up", "k":
+		if m.multiCursor > 0 {
+			m.multiCursor--
+		}
+	case "down", "j":
+		if m.multiCursor < len(m.multiOrder)-1 {
+			m.multiCursor++
+		}
+	case "space":
+		// Toggle selection
+		opt := m.multiOrder[m.multiCursor]
+		m.multiSelected[opt] = !m.multiSelected[opt]
+	case "ctrl+up", "K":
+		// Move item up
+		if m.multiCursor > 0 {
+			m.multiOrder[m.multiCursor], m.multiOrder[m.multiCursor-1] =
+				m.multiOrder[m.multiCursor-1], m.multiOrder[m.multiCursor]
+			m.multiCursor--
+		}
+	case "ctrl+down", "J":
+		// Move item down
+		if m.multiCursor < len(m.multiOrder)-1 {
+			m.multiOrder[m.multiCursor], m.multiOrder[m.multiCursor+1] =
+				m.multiOrder[m.multiCursor+1], m.multiOrder[m.multiCursor]
+			m.multiCursor++
+		}
+	}
 	return m, nil
 }
