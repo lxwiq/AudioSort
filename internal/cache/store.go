@@ -32,16 +32,26 @@ var (
 )
 
 func NewStore(path string) (*Store, error) {
-	db, err := bbolt.Open(path, 0600, nil)
+	db, err := bbolt.Open(path, 0600, &bbolt.Options{
+		Timeout: 1 * time.Second,
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	db.Update(func(tx *bbolt.Tx) error {
-		tx.CreateBucketIfNotExists(metadataBucket)
-		tx.CreateBucketIfNotExists(processedBucket)
+	err = db.Update(func(tx *bbolt.Tx) error {
+		if _, err := tx.CreateBucketIfNotExists(metadataBucket); err != nil {
+			return err
+		}
+		if _, err := tx.CreateBucketIfNotExists(processedBucket); err != nil {
+			return err
+		}
 		return nil
 	})
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
 
 	return &Store{db: db}, nil
 }
@@ -51,6 +61,9 @@ func (s *Store) GetMetadata(query string) (*CachedBook, bool) {
 
 	err := s.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(metadataBucket)
+		if b == nil {
+			return nil
+		}
 		data := b.Get([]byte(query))
 		if data == nil {
 			return nil
@@ -78,6 +91,9 @@ func (s *Store) SetMetadata(query string, metadata models.BookMetadata) error {
 
 	return s.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(metadataBucket)
+		if b == nil {
+			return nil
+		}
 		data, err := json.Marshal(cached)
 		if err != nil {
 			return err
@@ -89,13 +105,16 @@ func (s *Store) SetMetadata(query string, metadata models.BookMetadata) error {
 func (s *Store) IsProcessed(path string) bool {
 	var exists bool
 
-	s.db.View(func(tx *bbolt.Tx) error {
+	err := s.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(processedBucket)
+		if b == nil {
+			return nil
+		}
 		exists = b.Get([]byte(path)) != nil
 		return nil
 	})
 
-	return exists
+	return exists && err == nil
 }
 
 func (s *Store) MarkProcessed(sourcePath, destPath, checksum string) error {
@@ -108,6 +127,9 @@ func (s *Store) MarkProcessed(sourcePath, destPath, checksum string) error {
 
 	return s.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(processedBucket)
+		if b == nil {
+			return nil
+		}
 		data, err := json.Marshal(processed)
 		if err != nil {
 			return err
