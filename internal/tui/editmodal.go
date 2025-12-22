@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // ModalMode defines the type of editor in the modal
@@ -388,4 +390,149 @@ func (m EditModal) updateMultiSelect(msg tea.KeyMsg) (EditModal, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// View renders the modal
+func (m EditModal) View() string {
+	if !m.visible {
+		return ""
+	}
+
+	var content string
+	switch m.mode {
+	case ModalText:
+		content = m.viewText()
+	case ModalBool:
+		content = m.viewBool()
+	case ModalNumber:
+		content = m.viewNumber()
+	case ModalSelect:
+		content = m.viewSelect()
+	case ModalMultiSelect:
+		content = m.viewMultiSelect()
+	}
+
+	return m.renderModal(content)
+}
+
+func (m EditModal) renderModal(content string) string {
+	// Modal style with border
+	modalStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorPrimary).
+		Padding(1, 2).
+		Width(m.width)
+
+	// Title
+	title := TitleStyle.Render(m.title)
+
+	// Combine
+	inner := lipgloss.JoinVertical(lipgloss.Left, title, "", content)
+
+	return modalStyle.Render(inner)
+}
+
+func (m EditModal) viewText() string {
+	input := InputFocusedStyle.Width(m.width - 8).Render(m.textInput.View())
+	help := DimStyle.Render("Tab: autocomplete  Enter: confirm  Esc: cancel")
+	return lipgloss.JoinVertical(lipgloss.Left, input, "", help)
+}
+
+func (m EditModal) viewBool() string {
+	offStyle := ButtonStyle
+	onStyle := ButtonStyle
+
+	if m.boolValue {
+		onStyle = ButtonActiveStyle
+	} else {
+		offStyle = ButtonActiveStyle
+	}
+
+	toggle := lipgloss.JoinHorizontal(lipgloss.Center,
+		offStyle.Render("  OFF  "),
+		"  ",
+		onStyle.Render("  ON  "),
+	)
+
+	help := DimStyle.Render("←/→: toggle  Enter: confirm  Esc: cancel")
+	return lipgloss.JoinVertical(lipgloss.Center, toggle, "", help)
+}
+
+func (m EditModal) viewNumber() string {
+	// Number display with arrows
+	leftArrow := DimStyle.Render("◀")
+	rightArrow := DimStyle.Render("▶")
+	if m.numberValue > m.numberMin {
+		leftArrow = TextStyle.Render("◀")
+	}
+	if m.numberValue < m.numberMax {
+		rightArrow = TextStyle.Render("▶")
+	}
+
+	numDisplay := BoldStyle.Render(fmt.Sprintf(" %d ", m.numberValue))
+	display := lipgloss.JoinHorizontal(lipgloss.Center,
+		leftArrow, "  ", numDisplay, "  ", rightArrow,
+	)
+
+	limits := DimStyle.Render(fmt.Sprintf("(%d - %d)", m.numberMin, m.numberMax))
+	help := DimStyle.Render("←/→: adjust  Enter: confirm  Esc: cancel")
+
+	return lipgloss.JoinVertical(lipgloss.Center, display, limits, "", help)
+}
+
+func (m EditModal) viewSelect() string {
+	var lines []string
+
+	for i, opt := range m.selectOptions {
+		prefix := "  "
+		style := ListItemStyle
+		suffix := ""
+
+		if i == m.selectCursor {
+			prefix = "> "
+			style = SelectedItemStyle
+		}
+		if opt == m.selectValue {
+			suffix = " " + SuccessStyle.Render(IconCheck)
+		}
+
+		lines = append(lines, style.Render(prefix+opt+suffix))
+	}
+
+	list := lipgloss.JoinVertical(lipgloss.Left, lines...)
+	help := DimStyle.Render("↑/↓: select  Enter: confirm  Esc: cancel")
+
+	return lipgloss.JoinVertical(lipgloss.Left, list, "", help)
+}
+
+func (m EditModal) viewMultiSelect() string {
+	var lines []string
+
+	for i, opt := range m.multiOrder {
+		prefix := "  "
+		style := ListItemStyle
+		checkbox := DimStyle.Render("[ ]")
+
+		if m.multiSelected[opt] {
+			checkbox = SuccessStyle.Render("[x]")
+		}
+
+		if i == m.multiCursor {
+			prefix = "> "
+			style = SelectedItemStyle
+		}
+
+		line := fmt.Sprintf("%s%s %s", prefix, checkbox, opt)
+		lines = append(lines, style.Render(line))
+	}
+
+	list := lipgloss.JoinVertical(lipgloss.Left, lines...)
+	help := DimStyle.Render("Space: toggle  Ctrl+↑/↓: reorder  Enter: confirm")
+
+	return lipgloss.JoinVertical(lipgloss.Left, list, "", help)
+}
+
+// Visible returns whether the modal is visible
+func (m EditModal) Visible() bool {
+	return m.visible
 }
