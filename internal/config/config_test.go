@@ -16,7 +16,7 @@ func TestDefaultConfig(t *testing.T) {
 	}
 
 	// Check default sources
-	expectedSources := []string{"googlebooks", "openlibrary", "audible", "bnf"}
+	expectedSources := []string{"bookinfo", "googlebooks", "openlibrary"}
 	if len(cfg.Sources) != len(expectedSources) {
 		t.Errorf("Sources length = %d, want %d", len(cfg.Sources), len(expectedSources))
 	}
@@ -30,9 +30,14 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.OutputFormat != "audiobookshelf" {
 		t.Errorf("OutputFormat = %q, want %q", cfg.OutputFormat, "audiobookshelf")
 	}
-	if cfg.DefaultOutput != "" {
-		t.Errorf("DefaultOutput = %q, want empty string", cfg.DefaultOutput)
+
+	// DefaultOutput should be ~/Audiobooks-organized
+	home, _ := os.UserHomeDir()
+	expectedOutput := filepath.Join(home, "Audiobooks-organized")
+	if cfg.DefaultOutput != expectedOutput {
+		t.Errorf("DefaultOutput = %q, want %q", cfg.DefaultOutput, expectedOutput)
 	}
+
 	if cfg.CopyMode != false {
 		t.Errorf("CopyMode = %v, want false", cfg.CopyMode)
 	}
@@ -42,8 +47,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.SkipExisting != true {
 		t.Errorf("SkipExisting = %v, want true", cfg.SkipExisting)
 	}
-	if cfg.PreferredLanguage != "en" {
-		t.Errorf("PreferredLanguage = %q, want %q", cfg.PreferredLanguage, "en")
+	if cfg.PreferredLanguage != "fr" {
+		t.Errorf("PreferredLanguage = %q, want %q", cfg.PreferredLanguage, "fr")
 	}
 }
 
@@ -162,8 +167,8 @@ copy_mode: true
 	if cfg.ParallelWorkers != 4 {
 		t.Errorf("ParallelWorkers = %d, want 4 (should be preserved)", cfg.ParallelWorkers)
 	}
-	if cfg.PreferredLanguage != "en" {
-		t.Errorf("PreferredLanguage = %q, want %q (should be preserved)", cfg.PreferredLanguage, "en")
+	if cfg.PreferredLanguage != "fr" {
+		t.Errorf("PreferredLanguage = %q, want %q (should be preserved)", cfg.PreferredLanguage, "fr")
 	}
 }
 

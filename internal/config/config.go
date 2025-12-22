@@ -19,14 +19,17 @@ type Config struct {
 }
 
 func DefaultConfig() *Config {
+	home, _ := os.UserHomeDir()
+	defaultOutput := filepath.Join(home, "Audiobooks-organized")
+
 	return &Config{
-		Sources:           []string{"googlebooks", "openlibrary", "audible", "bnf"},
+		Sources:           []string{"bookinfo", "googlebooks", "openlibrary"},
 		OutputFormat:      "audiobookshelf",
-		DefaultOutput:     "",
+		DefaultOutput:     defaultOutput,
 		CopyMode:          false,
 		ParallelWorkers:   4,
 		SkipExisting:      true,
-		PreferredLanguage: "en",
+		PreferredLanguage: "fr",
 	}
 }
 

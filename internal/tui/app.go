@@ -545,9 +545,7 @@ func Run(sourcePath string, cfg *config.Config) error {
 		cfg = config.DefaultConfig()
 	}
 
-	if cfg.DefaultOutput == "" {
-		cfg.DefaultOutput = "./organized"
-	}
+	// DefaultOutput is set in config.DefaultConfig() to ~/Audiobooks-organized
 
 	p := tea.NewProgram(
 		New(sourcePath, cfg),
