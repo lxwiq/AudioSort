@@ -60,14 +60,15 @@ func (f *Fetcher) Fetch(ctx context.Context, query string) (*models.BookMetadata
 		close(results)
 	}()
 
-	// Return first result
-	for result := range results {
-		if f.cache != nil {
-			_ = f.cache.SetMetadata(query, *result)
-		}
-		cancel() // Cancel remaining goroutines
-		return result, nil
+	// Return first result (or error if no results)
+	result, ok := <-results
+	if !ok {
+		return nil, models.ErrNoMetadataFound
 	}
 
-	return nil, models.ErrNoMetadataFound
+	if f.cache != nil {
+		_ = f.cache.SetMetadata(query, *result)
+	}
+	cancel() // Cancel remaining goroutines
+	return result, nil
 }

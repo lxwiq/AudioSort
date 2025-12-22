@@ -428,6 +428,35 @@ func (m Model) viewDone() string {
 
 		content := lipgloss.JoinVertical(lipgloss.Left, summaryLines...)
 		sections = append(sections, BoxStyle.Width(m.width-6).Render(content))
+
+		// Show error details if any
+		if len(m.summary.Failures) > 0 {
+			sections = append(sections, "")
+			sections = append(sections, TitleStyle.Render("Error Details"))
+			sections = append(sections, "")
+
+			maxErrors := 10 // Limit to avoid overflow
+			for i, failure := range m.summary.Failures {
+				if i >= maxErrors {
+					remaining := len(m.summary.Failures) - maxErrors
+					sections = append(sections, DimStyle.Render(fmt.Sprintf("  ... and %d more errors", remaining)))
+					break
+				}
+
+				bookName := "Unknown"
+				if failure.Audiobook != nil && failure.Audiobook.Path != "" {
+					bookName = filepath.Base(failure.Audiobook.Path)
+				}
+
+				errMsg := "Unknown error"
+				if failure.Error != nil {
+					errMsg = failure.Error.Error()
+				}
+
+				sections = append(sections, ErrorMsgStyle.Render(fmt.Sprintf("  %s %s", IconCross, bookName)))
+				sections = append(sections, DimStyle.Render(fmt.Sprintf("    %s", truncate(errMsg, m.width-10))))
+			}
+		}
 	}
 
 	sections = append(sections, "")
