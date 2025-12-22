@@ -1,3 +1,0 @@
-beautifulsoup4>=4.12
-requests>=2.31
-tinytag>=1.8
