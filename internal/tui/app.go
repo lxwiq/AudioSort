@@ -267,6 +267,8 @@ func (m Model) startProcessing() (tea.Model, tea.Cmd) {
 	var sources []metadata.MetadataSource
 	for _, sourceName := range m.config.Sources {
 		switch sourceName {
+		case "bookinfo":
+			sources = append(sources, metadata.NewBookInfo(httpClient))
 		case "googlebooks":
 			sources = append(sources, metadata.NewGoogleBooks(httpClient))
 		case "openlibrary":
@@ -274,9 +276,10 @@ func (m Model) startProcessing() (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// If no sources configured, use defaults
+	// If no sources configured, use defaults (BookInfo first for better audiobook metadata)
 	if len(sources) == 0 {
 		sources = []metadata.MetadataSource{
+			metadata.NewBookInfo(httpClient),
 			metadata.NewGoogleBooks(httpClient),
 			metadata.NewOpenLibrary(httpClient),
 		}
