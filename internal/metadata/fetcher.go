@@ -63,7 +63,7 @@ func (f *Fetcher) Fetch(ctx context.Context, query string) (*models.BookMetadata
 	// Return first result
 	for result := range results {
 		if f.cache != nil {
-			f.cache.SetMetadata(query, *result)
+			_ = f.cache.SetMetadata(query, *result)
 		}
 		cancel() // Cancel remaining goroutines
 		return result, nil
