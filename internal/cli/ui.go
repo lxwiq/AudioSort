@@ -1,7 +1,8 @@
 package cli
 
 import (
-	"fmt"
+	"audiosort/internal/config"
+	"audiosort/internal/tui"
 
 	"github.com/spf13/cobra"
 )
@@ -20,6 +21,18 @@ func init() {
 }
 
 func runUI(cmd *cobra.Command, args []string) error {
-	// TUI will be implemented with the internal/tui package later
-	return fmt.Errorf("TUI not implemented yet - coming soon!")
+	// Get source path (default to current directory)
+	sourcePath := "."
+	if len(args) > 0 {
+		sourcePath = args[0]
+	}
+
+	// Load configuration
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	// Run the TUI
+	return tui.Run(sourcePath, cfg)
 }
