@@ -11,9 +11,9 @@ import (
 
 // PathInputModel is a TUI for entering a directory path
 type PathInputModel struct {
-	input    textinput.Model
-	title    string
-	err      error
+	input     textinput.Model
+	title     string
+	err       error
 	confirmed bool
 	cancelled bool
 
@@ -21,10 +21,7 @@ type PathInputModel struct {
 	height int
 }
 
-// pathSelectedMsg is sent when a path is confirmed
-type pathSelectedMsg struct {
-	path string
-}
+// Note: pathConfirmMsg is defined in menu.go and used for communication
 
 // NewPathInputModel creates a new path input model
 func NewPathInputModel(title, placeholder, defaultValue string) PathInputModel {
@@ -69,7 +66,9 @@ func (m PathInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c", "esc":
 			m.cancelled = true
-			return m, tea.Quit
+			return m, func() tea.Msg {
+				return pathConfirmMsg{path: "", confirmed: false}
+			}
 
 		case "enter":
 			path := m.input.Value()
@@ -94,7 +93,7 @@ func (m PathInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			m.confirmed = true
 			return m, func() tea.Msg {
-				return pathSelectedMsg{path: path}
+				return pathConfirmMsg{path: path, confirmed: true}
 			}
 
 		case "tab":

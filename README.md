@@ -87,7 +87,7 @@ When you run `./audiosort`, you'll see:
  Organize your audiobook collection with style
 
  [s] Scan    - Scan and organize audiobooks
- [/] Search  - Search for book metadata
+ [f] Search  - Search for book metadata
  [c] Config  - View and manage settings
  [x] Cache   - Manage metadata cache
 
@@ -99,7 +99,7 @@ When you run `./audiosort`, you'll see:
 **Navigation:**
 - `↑/↓` or `j/k` - Move up/down
 - `Enter` or `Space` - Select option
-- `s`, `/`, `c`, `x` - Quick keys
+- `s`, `f`, `c`, `x` - Quick keys
 - `q` - Quit
 
 ### Scanning Audiobooks
@@ -122,7 +122,7 @@ When you run `./audiosort`, you'll see:
 
 ### Searching Metadata
 
-1. Select **Search** from the menu (or press `/`)
+1. Select **Search** from the menu (or press `f`)
 2. Enter your search query (title, author, ISBN...)
 3. Browse results from multiple sources
 4. Press `Enter` on a result to see full details

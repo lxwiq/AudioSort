@@ -7,6 +7,18 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// AppView represents the current view in the application
+type AppView int
+
+const (
+	ViewMenu AppView = iota
+	ViewPathInput
+	ViewScan
+	ViewSearch
+	ViewConfig
+	ViewCache
+)
+
 // MenuItem represents a menu option
 type MenuItem struct {
 	title string
@@ -28,7 +40,7 @@ type MenuModel struct {
 func NewMenuModel(cfg *config.Config) MenuModel {
 	items := []MenuItem{
 		{title: "Scan", desc: "Scan and organize audiobooks", key: "s"},
-		{title: "Search", desc: "Search for book metadata", key: "/"},
+		{title: "Search", desc: "Search for book metadata", key: "f"},
 		{title: "Config", desc: "View and manage settings", key: "c"},
 		{title: "Cache", desc: "Manage metadata cache", key: "x"},
 	}
@@ -79,12 +91,12 @@ func (m MenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return menuActionMsg{action: m.items[m.cursor].title}
 			}
 
-		// Quick keys
+		// Quick keys - changed "/" to "f" to avoid conflicts
 		case "s", "1":
 			return m, func() tea.Msg {
 				return menuActionMsg{action: "Scan"}
 			}
-		case "/", "2":
+		case "f", "2":
 			return m, func() tea.Msg {
 				return menuActionMsg{action: "Search"}
 			}
@@ -155,7 +167,183 @@ func (m MenuModel) View() string {
 	)
 }
 
-// RunMenu runs the main menu and returns the selected action
+// MainAppModel is the root application model
+type MainAppModel struct {
+	config  *config.Config
+	view    AppView
+	menu    MenuModel
+	path    PathInputModel
+	scan    Model
+	search  SearchModel
+	cfgView ConfigModel
+	cache   CacheModel
+
+	// Pending data between views
+	pendingPath string
+
+	width  int
+	height int
+}
+
+// NewMainAppModel creates a new main app model
+func NewMainAppModel(cfg *config.Config) MainAppModel {
+	if cfg == nil {
+		cfg = config.DefaultConfig()
+	}
+
+	return MainAppModel{
+		config: cfg,
+		view:   ViewMenu,
+		menu:   NewMenuModel(cfg),
+		width:  80,
+		height: 24,
+	}
+}
+
+// Init initializes the main app
+func (m MainAppModel) Init() tea.Cmd {
+	return nil
+}
+
+// Update handles all messages
+func (m MainAppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		// Forward to active view
+		return m.forwardMessage(msg)
+
+	case tea.KeyMsg:
+		// Global quit
+		if msg.String() == "ctrl+c" {
+			return m, tea.Quit
+		}
+
+		// ESC returns to menu from sub-views
+		if msg.String() == "esc" && m.view != ViewMenu && m.view != ViewScan {
+			m.view = ViewMenu
+			m.menu = NewMenuModel(m.config)
+			return m, nil
+		}
+
+	case menuActionMsg:
+		return m.handleMenuAction(msg.action)
+
+	case pathConfirmMsg:
+		if msg.confirmed {
+			m.pendingPath = msg.path
+			m.view = ViewScan
+			m.scan = New(msg.path, m.config)
+			return m, m.scan.Init()
+		}
+		m.view = ViewMenu
+		return m, nil
+
+	case scanDoneMsg:
+		m.view = ViewMenu
+		m.menu = NewMenuModel(m.config)
+		return m, nil
+	}
+
+	return m.forwardMessage(msg)
+}
+
+// forwardMessage forwards messages to the active view
+func (m MainAppModel) forwardMessage(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch m.view {
+	case ViewMenu:
+		var newMenu tea.Model
+		newMenu, cmd = m.menu.Update(msg)
+		m.menu = newMenu.(MenuModel)
+
+	case ViewPathInput:
+		var newPath tea.Model
+		newPath, cmd = m.path.Update(msg)
+		m.path = newPath.(PathInputModel)
+
+	case ViewScan:
+		var newScan tea.Model
+		newScan, cmd = m.scan.Update(msg)
+		m.scan = newScan.(Model)
+
+	case ViewSearch:
+		var newSearch tea.Model
+		newSearch, cmd = m.search.Update(msg)
+		m.search = newSearch.(SearchModel)
+
+	case ViewConfig:
+		var newCfg tea.Model
+		newCfg, cmd = m.cfgView.Update(msg)
+		m.cfgView = newCfg.(ConfigModel)
+
+	case ViewCache:
+		var newCache tea.Model
+		newCache, cmd = m.cache.Update(msg)
+		m.cache = newCache.(CacheModel)
+	}
+
+	return m, cmd
+}
+
+// handleMenuAction handles menu selections
+func (m MainAppModel) handleMenuAction(action string) (tea.Model, tea.Cmd) {
+	switch action {
+	case "Scan":
+		m.view = ViewPathInput
+		m.path = NewPathInputModel("Scan Audiobooks", "Enter path to audiobooks...", "")
+		return m, m.path.Init()
+
+	case "Search":
+		m.view = ViewSearch
+		m.search = NewSearchModel(m.config, "")
+		return m, m.search.Init()
+
+	case "Config":
+		m.view = ViewConfig
+		m.cfgView = NewConfigModel(m.config)
+		return m, m.cfgView.Init()
+
+	case "Cache":
+		m.view = ViewCache
+		m.cache = NewCacheModel("")
+		return m, m.cache.Init()
+	}
+
+	return m, nil
+}
+
+// View renders the current view
+func (m MainAppModel) View() string {
+	switch m.view {
+	case ViewMenu:
+		return m.menu.View()
+	case ViewPathInput:
+		return m.path.View()
+	case ViewScan:
+		return m.scan.View()
+	case ViewSearch:
+		return m.search.View()
+	case ViewConfig:
+		return m.cfgView.View()
+	case ViewCache:
+		return m.cache.View()
+	default:
+		return "Unknown view"
+	}
+}
+
+// Message types
+type pathConfirmMsg struct {
+	path      string
+	confirmed bool
+}
+
+type scanDoneMsg struct{}
+
+// RunMenu runs the main menu
 func RunMenu(cfg *config.Config) (string, error) {
 	if cfg == nil {
 		cfg = config.DefaultConfig()
@@ -179,7 +367,7 @@ func RunMenu(cfg *config.Config) (string, error) {
 	return "", nil
 }
 
-// RunMenuWithAction runs the menu and executes the selected action
+// RunMenuWithAction runs the complete application
 func RunMenuWithAction(cfg *config.Config) error {
 	if cfg == nil {
 		var err error
@@ -189,94 +377,11 @@ func RunMenuWithAction(cfg *config.Config) error {
 		}
 	}
 
-	for {
-		// Create and run the menu
-		p := tea.NewProgram(
-			&menuRunner{
-				menu:   NewMenuModel(cfg),
-				config: cfg,
-			},
-			tea.WithAltScreen(),
-		)
+	p := tea.NewProgram(
+		NewMainAppModel(cfg),
+		tea.WithAltScreen(),
+	)
 
-		finalModel, err := p.Run()
-		if err != nil {
-			return err
-		}
-
-		runner, ok := finalModel.(*menuRunner)
-		if !ok || runner.quit {
-			return nil
-		}
-
-		// Action was handled, loop back to menu
-	}
-}
-
-// menuRunner wraps the menu and handles action execution
-type menuRunner struct {
-	menu      MenuModel
-	config    *config.Config
-	action    string
-	quit      bool
-	inSubmenu bool
-}
-
-func (m *menuRunner) Init() tea.Cmd {
-	return m.menu.Init()
-}
-
-func (m *menuRunner) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case menuActionMsg:
-		m.action = msg.action
-		// Execute the action
-		return m, m.executeAction(msg.action)
-
-	case tea.KeyMsg:
-		if msg.String() == "q" || msg.String() == "ctrl+c" {
-			m.quit = true
-			return m, tea.Quit
-		}
-	}
-
-	newMenu, cmd := m.menu.Update(msg)
-	m.menu = newMenu.(MenuModel)
-	return m, cmd
-}
-
-func (m *menuRunner) View() string {
-	return m.menu.View()
-}
-
-func (m *menuRunner) executeAction(action string) tea.Cmd {
-	return func() tea.Msg {
-		var err error
-
-		switch action {
-		case "Scan":
-			// Ask for path first
-			path, confirmed, pathErr := RunPathInput("Scan Audiobooks", "Enter path to audiobooks...", "")
-			if pathErr != nil {
-				return errorMsg{err: pathErr}
-			}
-			if !confirmed {
-				return nil // Cancelled, return to menu
-			}
-			err = Run(path, m.config)
-		case "Search":
-			err = RunSearch("", m.config)
-		case "Config":
-			err = RunConfig(m.config)
-		case "Cache":
-			err = RunCache("")
-		}
-
-		if err != nil {
-			return errorMsg{err: err}
-		}
-
-		// Return to menu
-		return nil
-	}
+	_, err := p.Run()
+	return err
 }
