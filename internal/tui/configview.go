@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"audiosort/internal/config"
@@ -22,6 +24,10 @@ type ConfigModel struct {
 	saved   bool
 	message string
 
+	// Modal editing
+	editing bool
+	modal   EditModal
+
 	// Dimensions
 	width  int
 	height int
@@ -32,6 +38,18 @@ type configItem struct {
 	value string
 	desc  string
 }
+
+type configField int
+
+const (
+	fieldSources configField = iota
+	fieldOutputFormat
+	fieldDefaultOutput
+	fieldCopyMode
+	fieldWorkers
+	fieldSkipExisting
+	fieldLanguage
+)
 
 // NewConfigModel creates a new config model
 func NewConfigModel(cfg *config.Config) ConfigModel {
@@ -186,6 +204,79 @@ func (m ConfigModel) rebuildItems() []configItem {
 		{key: "Skip Existing", value: fmt.Sprintf("%v", m.config.SkipExisting), desc: "Skip already processed books"},
 		{key: "Language", value: m.config.PreferredLanguage, desc: "Preferred metadata language"},
 	}
+}
+
+func (m *ConfigModel) openModal() tea.Cmd {
+	field := configField(m.cursor)
+
+	switch field {
+	case fieldSources:
+		m.modal = NewMultiSelectModal("Sources", "Edit Sources", AvailableSources, m.config.Sources)
+	case fieldOutputFormat:
+		m.modal = NewSelectModal("Output Format", "Edit Output Format", AvailableFormats, m.config.OutputFormat)
+	case fieldDefaultOutput:
+		m.modal = NewTextModal("Default Output", "Edit Default Output", m.config.DefaultOutput, true)
+	case fieldCopyMode:
+		m.modal = NewBoolModal("Copy Mode", "Edit Copy Mode", m.config.CopyMode)
+	case fieldWorkers:
+		m.modal = NewNumberModal("Workers", "Edit Workers", m.config.ParallelWorkers, 1, 32)
+	case fieldSkipExisting:
+		m.modal = NewBoolModal("Skip Existing", "Edit Skip Existing", m.config.SkipExisting)
+	case fieldLanguage:
+		m.modal = NewTextModal("Language", "Edit Language", m.config.PreferredLanguage, false)
+	}
+
+	m.editing = true
+	return m.modal.Init()
+}
+
+func (m *ConfigModel) applyModalResult(result EditModalResult) {
+	if !result.Confirmed {
+		return
+	}
+
+	field := configField(m.cursor)
+
+	switch field {
+	case fieldSources:
+		if sources, ok := result.Value.([]string); ok {
+			m.config.Sources = sources
+		}
+	case fieldOutputFormat:
+		if format, ok := result.Value.(string); ok {
+			m.config.OutputFormat = format
+		}
+	case fieldDefaultOutput:
+		if path, ok := result.Value.(string); ok {
+			// Expand ~
+			if len(path) > 0 && path[0] == '~' {
+				if home, err := os.UserHomeDir(); err == nil {
+					path = filepath.Join(home, path[1:])
+				}
+			}
+			m.config.DefaultOutput = path
+		}
+	case fieldCopyMode:
+		if val, ok := result.Value.(bool); ok {
+			m.config.CopyMode = val
+		}
+	case fieldWorkers:
+		if val, ok := result.Value.(int); ok {
+			m.config.ParallelWorkers = val
+		}
+	case fieldSkipExisting:
+		if val, ok := result.Value.(bool); ok {
+			m.config.SkipExisting = val
+		}
+	case fieldLanguage:
+		if val, ok := result.Value.(string); ok {
+			m.config.PreferredLanguage = val
+		}
+	}
+
+	m.items = m.rebuildItems()
+	m.message = "Value updated (press 's' to save)"
+	m.saved = false
 }
 
 // RunConfig runs the config TUI
