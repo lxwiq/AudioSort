@@ -1,12 +1,16 @@
 package tui
 
 import (
+	"fmt"
+	"path/filepath"
+
 	"audiosort/internal/config"
 	"audiosort/internal/core"
 	"audiosort/pkg/models"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/spinner"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // state represents the current state of the TUI application
@@ -17,13 +21,12 @@ const (
 	stateReady
 	stateProcessing
 	stateDone
-	stateHelp
 )
 
 // Model is the main application model for the TUI
 type Model struct {
-	state   state
-	config  *config.Config
+	state  state
+	config *config.Config
 
 	// Paths
 	sourcePath string
@@ -39,13 +42,12 @@ type Model struct {
 	pipeline *core.Pipeline
 
 	// State flags
-	scanning   bool
-	processing bool
-	showHelp   bool
+	showHelp bool
 
 	// Processing state
-	progress float64
-	summary  *models.Summary
+	progress    float64
+	processedCount int
+	summary     *models.Summary
 
 	// UI components
 	spinner spinner.Model
@@ -65,7 +67,7 @@ func New(sourcePath string, cfg *config.Config) Model {
 		destPath:   cfg.DefaultOutput,
 		scanner:    scanner,
 		selected:   make(map[int]bool),
-		spinner:    newSpinner(),
+		spinner:    NewSpinner(),
 		width:      80,
 		height:     24,
 	}
@@ -103,6 +105,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case processCompleteMsg:
 		return m.handleProcessComplete(msg)
+
+	case processProgressMsg:
+		m.processedCount = msg.current
+		m.progress = float64(msg.current) / float64(msg.total)
+		return m, nil
 
 	case tickMsg:
 		return m, tickCmd()
@@ -152,7 +159,6 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case stateReady:
 		return m.handleReadyKeys(msg)
 	case stateDone:
-		// Only allow quit in done state
 		return m, nil
 	}
 
@@ -171,10 +177,8 @@ func (m Model) handleReadyKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor++
 		}
 	case " ":
-		// Toggle selection
 		m.selected[m.cursor] = !m.selected[m.cursor]
 	case "a":
-		// Select all
 		allSelected := len(m.selected) == len(m.books)
 		m.selected = make(map[int]bool)
 		if !allSelected {
@@ -183,7 +187,6 @@ func (m Model) handleReadyKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "s":
-		// Skip selected
 		for i := range m.selected {
 			if m.selected[i] {
 				m.books[i].Status = models.StatusSkipped
@@ -191,7 +194,6 @@ func (m Model) handleReadyKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.selected = make(map[int]bool)
 	case "enter":
-		// Process selected books
 		return m.startProcessing()
 	}
 
@@ -207,10 +209,8 @@ func (m Model) handleScanComplete(msg scanCompleteMsg) (tea.Model, tea.Cmd) {
 	}
 
 	m.books = msg.books
-	m.scanning = false
 	m.state = stateReady
 
-	// Auto-select all books
 	m.selected = make(map[int]bool)
 	for i := range m.books {
 		m.selected[i] = true
@@ -231,7 +231,6 @@ func (m Model) handleMetadataFetched(msg metadataFetchedMsg) (tea.Model, tea.Cmd
 
 // handleProcessComplete processes the completion message
 func (m Model) handleProcessComplete(msg processCompleteMsg) (tea.Model, tea.Cmd) {
-	m.processing = false
 	m.state = stateDone
 
 	if msg.err != nil {
@@ -245,7 +244,6 @@ func (m Model) handleProcessComplete(msg processCompleteMsg) (tea.Model, tea.Cmd
 
 // startProcessing initiates the processing pipeline
 func (m Model) startProcessing() (tea.Model, tea.Cmd) {
-	// Collect selected books
 	var selectedBooks []models.Audiobook
 	for i, selected := range m.selected {
 		if selected && i < len(m.books) {
@@ -254,17 +252,12 @@ func (m Model) startProcessing() (tea.Model, tea.Cmd) {
 	}
 
 	if len(selectedBooks) == 0 {
-		// Nothing to process
 		return m, nil
 	}
 
 	m.state = stateProcessing
-	m.processing = true
 	m.progress = 0.0
 
-	// Create pipeline
-	// Note: This is a simplified version. In a real implementation,
-	// you would need to properly initialize the metadata fetcher and writers
 	opts := core.PipelineOptions{
 		SourcePath: m.sourcePath,
 		DestPath:   m.destPath,
@@ -282,13 +275,208 @@ func (m Model) startProcessing() (tea.Model, tea.Cmd) {
 	)
 }
 
+// View methods
+
+func (m Model) viewScanning() string {
+	var sections []string
+
+	sections = append(sections, Header(m.width, "Scanning Audiobooks"))
+	sections = append(sections, "")
+	sections = append(sections, SpinnerWithText(m.spinner, "Scanning "+m.sourcePath+"..."))
+	sections = append(sections, "")
+	sections = append(sections, DimStyle.Render("Looking for audio files..."))
+
+	return AppStyle.Width(m.width).Height(m.height).Render(
+		lipgloss.JoinVertical(lipgloss.Left, sections...),
+	)
+}
+
+func (m Model) viewBookList() string {
+	var sections []string
+
+	sections = append(sections, HeaderCompact("Scan Results"))
+	sections = append(sections, "")
+
+	// Summary
+	selectedCount := 0
+	for _, selected := range m.selected {
+		if selected {
+			selectedCount++
+		}
+	}
+	summary := fmt.Sprintf("Found %d audiobooks, %d selected", len(m.books), selectedCount)
+	sections = append(sections, SubtitleStyle.Render(summary))
+	sections = append(sections, "")
+
+	// Book list
+	sections = append(sections, m.renderBookList())
+
+	// Footer
+	sections = append(sections, "")
+	sections = append(sections, Footer(
+		"↑/↓", "navigate",
+		"space", "toggle",
+		"a", "select all",
+		"enter", "process",
+		"?", "help",
+	))
+
+	return AppStyle.Width(m.width).Height(m.height).Render(
+		lipgloss.JoinVertical(lipgloss.Left, sections...),
+	)
+}
+
+func (m Model) renderBookList() string {
+	if len(m.books) == 0 {
+		return Alert("warning", "No audiobooks found in "+m.sourcePath)
+	}
+
+	var lines []string
+	maxVisible := m.height - 15
+	if maxVisible < 5 {
+		maxVisible = 5
+	}
+
+	start := 0
+	if m.cursor >= maxVisible {
+		start = m.cursor - maxVisible + 1
+	}
+
+	end := start + maxVisible
+	if end > len(m.books) {
+		end = len(m.books)
+	}
+
+	for i := start; i < end; i++ {
+		book := m.books[i]
+		style := ListItemStyle
+
+		// Checkbox
+		checkbox := DimStyle.Render("[ ] ")
+		if m.selected[i] {
+			checkbox = SuccessStyle.Render("[x] ")
+		}
+
+		// Cursor
+		cursor := "  "
+		if i == m.cursor {
+			style = SelectedItemStyle
+			cursor = InfoStyle.Render("> ")
+		}
+
+		// Book info
+		name := filepath.Base(book.Path)
+		status := RenderStatusBadge(string(book.Status))
+
+		line := cursor + checkbox + truncate(name, m.width-20) + " " + status
+		lines = append(lines, style.Render(line))
+	}
+
+	// Scroll indicator
+	if len(m.books) > maxVisible {
+		scrollInfo := DimStyle.Render(fmt.Sprintf("  [%d/%d]", m.cursor+1, len(m.books)))
+		lines = append(lines, scrollInfo)
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+}
+
+func (m Model) viewProcessing() string {
+	var sections []string
+
+	sections = append(sections, HeaderCompact("Processing"))
+	sections = append(sections, "")
+	sections = append(sections, SpinnerWithText(m.spinner, "Processing audiobooks..."))
+	sections = append(sections, "")
+
+	// Progress bar
+	total := 0
+	for _, s := range m.selected {
+		if s {
+			total++
+		}
+	}
+	if total == 0 {
+		total = 1
+	}
+
+	sections = append(sections, Progress(m.processedCount, total, "Progress", m.width-10))
+
+	return AppStyle.Width(m.width).Height(m.height).Render(
+		lipgloss.JoinVertical(lipgloss.Left, sections...),
+	)
+}
+
+func (m Model) viewDone() string {
+	var sections []string
+
+	sections = append(sections, HeaderCompact("Complete"))
+	sections = append(sections, "")
+
+	if m.err != nil {
+		sections = append(sections, Alert("error", m.err.Error()))
+	} else if m.summary != nil {
+		// Summary box
+		var summaryLines []string
+		summaryLines = append(summaryLines, TitleStyle.Render("Processing Summary"))
+		summaryLines = append(summaryLines, "")
+		summaryLines = append(summaryLines, SuccessStyle.Render(fmt.Sprintf("%s Processed: %d", IconCheck, m.summary.Processed)))
+		summaryLines = append(summaryLines, WarningStyle.Render(fmt.Sprintf("! Skipped:   %d", m.summary.Skipped)))
+		summaryLines = append(summaryLines, ErrorMsgStyle.Render(fmt.Sprintf("%s Errors:    %d", IconCross, m.summary.Errors)))
+		summaryLines = append(summaryLines, "")
+		summaryLines = append(summaryLines, DimStyle.Render(fmt.Sprintf("Total: %d in %s", m.summary.Total, m.summary.Duration.Round(1e9).String())))
+
+		content := lipgloss.JoinVertical(lipgloss.Left, summaryLines...)
+		sections = append(sections, BoxStyle.Width(m.width-6).Render(content))
+	}
+
+	sections = append(sections, "")
+	sections = append(sections, Footer("q", "quit"))
+
+	return AppStyle.Width(m.width).Height(m.height).Render(
+		lipgloss.JoinVertical(lipgloss.Left, sections...),
+	)
+}
+
+func (m Model) viewHelp() string {
+	var sections []string
+
+	sections = append(sections, HeaderCompact("Help"))
+	sections = append(sections, "")
+
+	helpContent := []struct{ key, desc string }{
+		{"↑/k", "Move up"},
+		{"↓/j", "Move down"},
+		{"space", "Toggle selection"},
+		{"a", "Select/deselect all"},
+		{"s", "Skip selected"},
+		{"enter", "Process selected"},
+		{"?", "Toggle help"},
+		{"q", "Quit"},
+	}
+
+	var lines []string
+	for _, h := range helpContent {
+		lines = append(lines, RenderHelpKey(h.key, h.desc))
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
+	sections = append(sections, BoxStyle.Width(m.width-6).Render(content))
+
+	sections = append(sections, "")
+	sections = append(sections, Footer("?", "close help"))
+
+	return AppStyle.Width(m.width).Height(m.height).Render(
+		lipgloss.JoinVertical(lipgloss.Left, sections...),
+	)
+}
+
 // Run starts the TUI application
 func Run(sourcePath string, cfg *config.Config) error {
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
 
-	// Set default output if not configured
 	if cfg.DefaultOutput == "" {
 		cfg.DefaultOutput = "./organized"
 	}
