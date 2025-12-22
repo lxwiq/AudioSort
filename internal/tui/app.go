@@ -2,10 +2,14 @@ package tui
 
 import (
 	"fmt"
+	"net/http"
+	"os"
 	"path/filepath"
 
+	"audiosort/internal/cache"
 	"audiosort/internal/config"
 	"audiosort/internal/core"
+	"audiosort/internal/metadata"
 	"audiosort/pkg/models"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -258,6 +262,37 @@ func (m Model) startProcessing() (tea.Model, tea.Cmd) {
 	m.state = stateProcessing
 	m.progress = 0.0
 
+	// Create metadata sources based on configuration
+	httpClient := &http.Client{}
+	var sources []metadata.MetadataSource
+	for _, sourceName := range m.config.Sources {
+		switch sourceName {
+		case "googlebooks":
+			sources = append(sources, metadata.NewGoogleBooks(httpClient))
+		case "openlibrary":
+			sources = append(sources, metadata.NewOpenLibrary(httpClient))
+		}
+	}
+
+	// If no sources configured, use defaults
+	if len(sources) == 0 {
+		sources = []metadata.MetadataSource{
+			metadata.NewGoogleBooks(httpClient),
+			metadata.NewOpenLibrary(httpClient),
+		}
+	}
+
+	// Create cache store
+	var cacheStore *cache.Store
+	home, err := os.UserHomeDir()
+	if err == nil {
+		cachePath := filepath.Join(home, ".cache", "audiosort", "metadata.db")
+		cacheStore, _ = cache.NewStore(cachePath) // Ignore errors, cache is optional
+	}
+
+	// Create fetcher
+	fetcher := metadata.NewFetcher(sources, cacheStore)
+
 	opts := core.PipelineOptions{
 		SourcePath: m.sourcePath,
 		DestPath:   m.destPath,
@@ -265,6 +300,7 @@ func (m Model) startProcessing() (tea.Model, tea.Cmd) {
 		CopyMode:   m.config.CopyMode,
 		SkipExist:  m.config.SkipExisting,
 		DryRun:     false,
+		Fetcher:    fetcher,
 	}
 
 	m.pipeline = core.NewPipeline(opts)
