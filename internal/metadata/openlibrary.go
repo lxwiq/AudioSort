@@ -53,6 +53,10 @@ func (o *OpenLibrary) Search(ctx context.Context, query string) ([]models.BookMe
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API request failed with status %d", resp.StatusCode)
+	}
+
 	var result struct {
 		Docs []struct {
 			Title            string   `json:"title"`

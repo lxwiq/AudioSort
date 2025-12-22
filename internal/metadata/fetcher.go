@@ -2,9 +2,7 @@ package metadata
 
 import (
 	"context"
-	"net/http"
 	"sync"
-	"time"
 
 	"audiosort/internal/cache"
 	"audiosort/pkg/models"
@@ -14,7 +12,6 @@ import (
 type Fetcher struct {
 	sources []MetadataSource
 	cache   *cache.Store
-	client  *http.Client
 }
 
 // NewFetcher creates a new metadata fetcher with the given sources and cache
@@ -22,7 +19,6 @@ func NewFetcher(sources []MetadataSource, cacheStore *cache.Store) *Fetcher {
 	return &Fetcher{
 		sources: sources,
 		cache:   cacheStore,
-		client:  &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
@@ -37,6 +33,9 @@ func (f *Fetcher) Fetch(ctx context.Context, query string) (*models.BookMetadata
 		}
 	}
 
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	// Fetch from all sources in parallel
 	results := make(chan *models.BookMetadata, len(f.sources))
 	var wg sync.WaitGroup
@@ -47,7 +46,11 @@ func (f *Fetcher) Fetch(ctx context.Context, query string) (*models.BookMetadata
 			defer wg.Done()
 			books, err := s.Search(ctx, query)
 			if err == nil && len(books) > 0 {
-				results <- &books[0]
+				select {
+				case results <- &books[0]:
+				case <-ctx.Done():
+					return
+				}
 			}
 		}(source)
 	}
@@ -62,6 +65,7 @@ func (f *Fetcher) Fetch(ctx context.Context, query string) (*models.BookMetadata
 		if f.cache != nil {
 			f.cache.SetMetadata(query, *result)
 		}
+		cancel() // Cancel remaining goroutines
 		return result, nil
 	}
 

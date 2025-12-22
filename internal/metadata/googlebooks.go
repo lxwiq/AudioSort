@@ -11,6 +11,8 @@ import (
 	"audiosort/pkg/models"
 )
 
+var yearRegex = regexp.MustCompile(`\d{4}`)
+
 // GoogleBooks implements MetadataSource for Google Books API
 type GoogleBooks struct {
 	client *http.Client
@@ -53,6 +55,10 @@ func (g *GoogleBooks) Search(ctx context.Context, query string) ([]models.BookMe
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API request failed with status %d", resp.StatusCode)
+	}
 
 	var result struct {
 		Items []struct {
@@ -115,7 +121,5 @@ func (g *GoogleBooks) Search(ctx context.Context, query string) ([]models.BookMe
 
 // extractYear extracts the year from a date string
 func extractYear(date string) string {
-	re := regexp.MustCompile(`\d{4}`)
-	match := re.FindString(date)
-	return match
+	return yearRegex.FindString(date)
 }
