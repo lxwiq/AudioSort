@@ -2,6 +2,7 @@ package tui
 
 import (
 	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // ModalMode defines the type of editor in the modal
@@ -162,4 +163,109 @@ func NewMultiSelectModal(field, title string, allOptions []string, selected []st
 		width:         45,
 		height:        len(allOptions) + 8,
 	}
+}
+
+// Init initializes the modal
+func (m EditModal) Init() tea.Cmd {
+	if m.mode == ModalText {
+		return textinput.Blink
+	}
+	return nil
+}
+
+// Update handles messages for the modal
+func (m EditModal) Update(msg tea.Msg) (EditModal, tea.Cmd) {
+	if !m.visible {
+		return m, nil
+	}
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			m.visible = false
+			return m, func() tea.Msg {
+				return EditModalResult{Confirmed: false, Field: m.field}
+			}
+
+		case "enter":
+			m.visible = false
+			return m, func() tea.Msg {
+				return EditModalResult{
+					Confirmed: true,
+					Field:     m.field,
+					Value:     m.getValue(),
+				}
+			}
+		}
+
+		// Mode-specific handling
+		switch m.mode {
+		case ModalText:
+			return m.updateText(msg)
+		case ModalBool:
+			return m.updateBool(msg)
+		case ModalNumber:
+			return m.updateNumber(msg)
+		case ModalSelect:
+			return m.updateSelect(msg)
+		case ModalMultiSelect:
+			return m.updateMultiSelect(msg)
+		}
+	}
+
+	// Pass through to text input if in text mode
+	if m.mode == ModalText {
+		var cmd tea.Cmd
+		m.textInput, cmd = m.textInput.Update(msg)
+		return m, cmd
+	}
+
+	return m, nil
+}
+
+func (m EditModal) getValue() any {
+	switch m.mode {
+	case ModalText:
+		return m.textInput.Value()
+	case ModalBool:
+		return m.boolValue
+	case ModalNumber:
+		return m.numberValue
+	case ModalSelect:
+		if len(m.selectOptions) == 0 || m.selectCursor < 0 || m.selectCursor >= len(m.selectOptions) {
+			return ""
+		}
+		return m.selectOptions[m.selectCursor]
+	case ModalMultiSelect:
+		// Return only selected items in order
+		var result []string
+		for _, opt := range m.multiOrder {
+			if m.multiSelected[opt] {
+				result = append(result, opt)
+			}
+		}
+		return result
+	}
+	return nil
+}
+
+func (m EditModal) updateText(msg tea.KeyMsg) (EditModal, tea.Cmd) {
+	return m, nil
+}
+
+func (m EditModal) updateBool(msg tea.KeyMsg) (EditModal, tea.Cmd) {
+	return m, nil
+}
+
+func (m EditModal) updateNumber(msg tea.KeyMsg) (EditModal, tea.Cmd) {
+	return m, nil
+}
+
+func (m EditModal) updateSelect(msg tea.KeyMsg) (EditModal, tea.Cmd) {
+	return m, nil
+}
+
+func (m EditModal) updateMultiSelect(msg tea.KeyMsg) (EditModal, tea.Cmd) {
+	return m, nil
 }
