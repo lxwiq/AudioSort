@@ -61,7 +61,7 @@ func (s *Scanner) scanDirectory(ctx context.Context, root string, results chan<-
 	semaphore := make(chan struct{}, s.workers)
 	var wg sync.WaitGroup
 
-	filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		// Check context cancellation
 		select {
 		case <-ctx.Done():
@@ -141,20 +141,7 @@ func (s *Scanner) analyzeDirectory(ctx context.Context, dirPath string) *models.
 		}
 	}
 
-	// Only return this directory as an audiobook if:
-	// 1. It contains audio files directly, OR
-	// 2. It has no subdirectories and contains audio files
-	// This avoids returning parent folders that contain audiobook subfolders
-	if len(audioFiles) > 0 && !hasSubdirs {
-		return &models.Audiobook{
-			Path:   dirPath,
-			Files:  audioFiles,
-			Status: models.StatusPending,
-		}
-	}
-
-	// If this directory has audio files but also has subdirectories,
-	// only consider it an audiobook if the audio files are significant
+	// Return this directory as an audiobook if it contains audio files
 	if len(audioFiles) > 0 {
 		return &models.Audiobook{
 			Path:   dirPath,

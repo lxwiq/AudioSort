@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -109,15 +110,22 @@ func (p *Pipeline) processAudiobooks(ctx context.Context, audiobookChan <-chan m
 
 	// Feed workers
 	go func() {
-		for audiobook := range audiobookChan {
+		defer close(workerChan)
+		for {
 			select {
-			case workerChan <- audiobook:
 			case <-ctx.Done():
-				close(workerChan)
 				return
+			case audiobook, ok := <-audiobookChan:
+				if !ok {
+					return
+				}
+				select {
+				case workerChan <- audiobook:
+				case <-ctx.Done():
+					return
+				}
 			}
 		}
-		close(workerChan)
 	}()
 
 	// Close results channel when all workers are done
@@ -223,13 +231,12 @@ func (p *Pipeline) collectResults(results <-chan models.Result) *models.Summary 
 	return summary
 }
 
-// inferQuery generates a search query from an audiobook's path and files
+// inferQuery generates a search query from an audiobook's path
 func inferQuery(book *models.Audiobook) string {
 	if book == nil || book.Path == "" {
 		return ""
 	}
 
-	// TODO: Could extract album/artist from ID3 tags in book.Files
-	// For now, use the directory name as the query
-	return book.Path
+	// Use the directory name as the query (folder names usually contain title/author)
+	return filepath.Base(book.Path)
 }

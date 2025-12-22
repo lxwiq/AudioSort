@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"audiosort/pkg/models"
@@ -178,12 +179,26 @@ func (o *Organizer) copyFile(src, dst string) error {
 	}
 	defer srcFile.Close()
 
+	// Get source file info for permissions
+	srcInfo, err := srcFile.Stat()
+	if err != nil {
+		return err
+	}
+
 	// Create destination file
 	dstFile, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	defer dstFile.Close()
+
+	// Use a cleanup flag to handle errors
+	success := false
+	defer func() {
+		dstFile.Close()
+		if !success {
+			os.Remove(dst) // Clean up partial file on error
+		}
+	}()
 
 	// Copy contents
 	if _, err := io.Copy(dstFile, srcFile); err != nil {
@@ -196,11 +211,12 @@ func (o *Organizer) copyFile(src, dst string) error {
 	}
 
 	// Copy file permissions
-	srcInfo, err := srcFile.Stat()
-	if err != nil {
+	if err := os.Chmod(dst, srcInfo.Mode()); err != nil {
 		return err
 	}
-	return os.Chmod(dst, srcInfo.Mode())
+
+	success = true
+	return nil
 }
 
 // moveFile moves a file from src to dst
@@ -208,8 +224,7 @@ func (o *Organizer) moveFile(src, dst string) error {
 	// Check if destination exists
 	if _, err := os.Stat(dst); err == nil {
 		if o.skipExist {
-			// Remove source if skip mode is on (consider it moved)
-			return os.Remove(src)
+			return nil // Skip, don't delete source
 		}
 	}
 
@@ -222,6 +237,20 @@ func (o *Organizer) moveFile(src, dst string) error {
 	// If rename fails, fall back to copy + delete
 	if err := o.copyFile(src, dst); err != nil {
 		return err
+	}
+
+	// Verify copy succeeded before deleting source
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	dstInfo, err := os.Stat(dst)
+	if err != nil {
+		return fmt.Errorf("destination file missing after copy: %w", err)
+	}
+	if srcInfo.Size() != dstInfo.Size() {
+		os.Remove(dst) // Clean up incomplete copy
+		return fmt.Errorf("copy verification failed: size mismatch")
 	}
 
 	return os.Remove(src)
@@ -247,7 +276,7 @@ func (o *Organizer) copyAdditionalFiles(ctx context.Context, srcDir, dstDir stri
 		}
 
 		// Skip audio files (already processed)
-		ext := filepath.Ext(entry.Name())
+		ext := strings.ToLower(filepath.Ext(entry.Name()))
 		if audioExtensions[ext] {
 			continue
 		}
