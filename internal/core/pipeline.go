@@ -3,6 +3,8 @@ package core
 import (
 	"context"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -238,5 +240,44 @@ func inferQuery(book *models.Audiobook) string {
 	}
 
 	// Use the directory name as the query (folder names usually contain title/author)
-	return filepath.Base(book.Path)
+	query := filepath.Base(book.Path)
+	return cleanQuery(query)
+}
+
+// cleanQuery removes noise from folder names to create better search queries
+func cleanQuery(query string) string {
+	// Remove content in brackets and parentheses (quality info, etc.)
+	// Pattern: [anything] or (anything)
+	bracketRegex := regexp.MustCompile(`[\[\(][^\]\)]*[\]\)]`)
+	query = bracketRegex.ReplaceAllString(query, "")
+
+	// Replace underscores with spaces
+	query = strings.ReplaceAll(query, "_", " ")
+
+	// Remove common audio format/quality terms
+	noisePatterns := []string{
+		`(?i)\bmp3\b`,
+		`(?i)\bm4a\b`,
+		`(?i)\bm4b\b`,
+		`(?i)\bflac\b`,
+		`(?i)\bogg\b`,
+		`(?i)\bwma\b`,
+		`(?i)\d+\s*kbps?\b`,
+		`(?i)\d+\s*kb/s\b`,
+		`(?i)\d+k\b`,
+	}
+	for _, pattern := range noisePatterns {
+		re := regexp.MustCompile(pattern)
+		query = re.ReplaceAllString(query, "")
+	}
+
+	// Clean up multiple spaces and trim
+	spaceRegex := regexp.MustCompile(`\s+`)
+	query = spaceRegex.ReplaceAllString(query, " ")
+	query = strings.TrimSpace(query)
+
+	// Remove trailing/leading dashes and hyphens
+	query = strings.Trim(query, "- ")
+
+	return query
 }
