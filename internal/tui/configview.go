@@ -82,6 +82,23 @@ func (m ConfigModel) Init() tea.Cmd {
 
 // Update handles messages for the config model
 func (m ConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Handle modal result
+	if result, ok := msg.(EditModalResult); ok {
+		m.editing = false
+		m.applyModalResult(result)
+		return m, nil
+	}
+
+	// If modal is open, delegate to modal
+	if m.editing {
+		var cmd tea.Cmd
+		m.modal, cmd = m.modal.Update(msg)
+		if !m.modal.Visible() {
+			m.editing = false
+		}
+		return m, cmd
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -90,7 +107,14 @@ func (m ConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c", "q", "esc":
+		case "ctrl+c", "q":
+			return m, tea.Quit
+
+		case "esc":
+			if m.editing {
+				m.editing = false
+				return m, nil
+			}
 			return m, tea.Quit
 
 		case "up", "k":
@@ -102,6 +126,9 @@ func (m ConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor < len(m.items)-1 {
 				m.cursor++
 			}
+
+		case "enter":
+			return m, m.openModal()
 
 		case "s":
 			// Save config
