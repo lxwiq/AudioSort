@@ -173,11 +173,27 @@ func (m ConfigModel) View() string {
 
 	// Footer
 	sections = append(sections, "")
-	sections = append(sections, Footer("↑/↓", "navigate", "s", "save", "r", "reset", "q", "quit"))
+	footerText := Footer("↑/↓", "navigate", "Enter", "edit", "s", "save", "r", "reset", "q", "quit")
+	sections = append(sections, footerText)
 
-	return AppStyle.Width(m.width).Height(m.height).Render(
+	baseView := AppStyle.Width(m.width).Height(m.height).Render(
 		lipgloss.JoinVertical(lipgloss.Left, sections...),
 	)
+
+	// If modal is open, overlay it
+	if m.editing {
+		modalView := m.modal.View()
+
+		return lipgloss.Place(
+			m.width, m.height,
+			lipgloss.Center, lipgloss.Center,
+			modalView,
+			lipgloss.WithWhitespaceChars(" "),
+			lipgloss.WithWhitespaceForeground(lipgloss.Color("#1a1a1a")),
+		)
+	}
+
+	return baseView
 }
 
 func (m ConfigModel) renderConfigList() string {
