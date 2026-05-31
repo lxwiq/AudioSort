@@ -1,15 +1,13 @@
 package tui
 
 import (
+	"context"
 	"fmt"
-	"net/http"
-	"os"
 	"path/filepath"
 
 	"audiosort/internal/cache"
 	"audiosort/internal/config"
 	"audiosort/internal/core"
-	"audiosort/internal/metadata"
 	"audiosort/pkg/models"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -17,7 +15,52 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// state represents the current state of the TUI application
+// subView is the common contract implemented by every screen. It mirrors the
+// Elm-style tea.Model but Update returns a subView (so the root can hold the
+// active screen without per-type assertions) and SetSize lets the root push
+// the authoritative terminal dimensions down at creation time.
+type subView interface {
+	Init() tea.Cmd
+	Update(tea.Msg) (subView, tea.Cmd)
+	View() string
+	SetSize(width, height int) subView
+}
+
+// standaloneModel wraps a single sub-view so it can run as the root program of
+// a CLI sub-command. There is no menu in that mode, so backToMenuMsg and
+// quitMsg both become tea.Quit.
+type standaloneModel struct {
+	sub subView
+}
+
+// newStandaloneProgram builds a program that runs a single sub-view directly.
+func newStandaloneProgram(sub subView) *tea.Program {
+	return newProgram(standaloneModel{sub: sub})
+}
+
+func (s standaloneModel) Init() tea.Cmd { return s.sub.Init() }
+
+func (s standaloneModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		s.sub = s.sub.SetSize(msg.Width, msg.Height)
+		return s, nil
+	case tea.KeyMsg:
+		if msg.String() == "ctrl+c" {
+			return s, tea.Quit
+		}
+	case backToMenuMsg, quitMsg:
+		return s, tea.Quit
+	}
+
+	var cmd tea.Cmd
+	s.sub, cmd = s.sub.Update(msg)
+	return s, cmd
+}
+
+func (s standaloneModel) View() string { return s.sub.View() }
+
+// state represents the current state of the scan view
 type state int
 
 const (
@@ -27,8 +70,8 @@ const (
 	stateDone
 )
 
-// Model is the main application model for the TUI
-type Model struct {
+// ScanModel drives the scan / selection / processing screen.
+type ScanModel struct {
 	state  state
 	config *config.Config
 
@@ -45,12 +88,22 @@ type Model struct {
 	scanner  *core.Scanner
 	pipeline *core.Pipeline
 
+	// Shared cache handle (owned by the root model / standalone entry point)
+	cache *cache.Store
+
+	// Cancellation for the in-flight scan / processing run. Stored on the model
+	// (copied by closure across Update copies, which all share one cancel func)
+	// so leaving the view can stop the work.
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	// State flags
 	showHelp bool
 
 	// Processing state
 	progress       float64
 	processedCount int
+	progressCh     chan core.ProgressUpdate
 	summary        *models.Summary
 
 	// UI components
@@ -60,16 +113,21 @@ type Model struct {
 	err     error
 }
 
-// New creates a new TUI model with the given source path and configuration
-func New(sourcePath string, cfg *config.Config) Model {
+// NewScanModel creates a new scan model with the given source path, configuration
+// and shared cache handle (which may be nil; the cache is optional).
+func NewScanModel(sourcePath string, cfg *config.Config, store *cache.Store) ScanModel {
 	scanner := core.NewScanner(cfg.ParallelWorkers)
+	ctx, cancel := context.WithCancel(context.Background())
 
-	return Model{
+	return ScanModel{
 		state:      stateScanning,
 		config:     cfg,
 		sourcePath: sourcePath,
 		destPath:   cfg.DefaultOutput,
 		scanner:    scanner,
+		cache:      store,
+		ctx:        ctx,
+		cancel:     cancel,
 		selected:   make(map[int]bool),
 		spinner:    NewSpinner(),
 		width:      80,
@@ -77,22 +135,24 @@ func New(sourcePath string, cfg *config.Config) Model {
 	}
 }
 
-// Init initializes the TUI application
-func (m Model) Init() tea.Cmd {
+// Init initializes the scan view
+func (m ScanModel) Init() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
-		scanCmd(m.sourcePath, m.scanner),
+		scanCmd(m.ctx, m.sourcePath, m.scanner),
 	)
 }
 
-// Update handles messages and updates the model
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		return m, nil
+// SetSize updates the cached terminal dimensions.
+func (m ScanModel) SetSize(width, height int) subView {
+	m.width = width
+	m.height = height
+	return m
+}
 
+// Update handles messages and updates the model
+func (m ScanModel) Update(msg tea.Msg) (subView, tea.Cmd) {
+	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		return m.handleKeyPress(msg)
 
@@ -104,31 +164,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case scanCompleteMsg:
 		return m.handleScanComplete(msg)
 
-	case metadataFetchedMsg:
-		return m.handleMetadataFetched(msg)
-
 	case processCompleteMsg:
 		return m.handleProcessComplete(msg)
 
 	case processProgressMsg:
 		m.processedCount = msg.current
-		m.progress = float64(msg.current) / float64(msg.total)
-		return m, nil
-
-	case tickMsg:
-		return m, tickCmd()
-
-	case errorMsg:
-		m.err = msg.err
-		m.state = stateDone
-		return m, nil
+		if msg.total > 0 {
+			m.progress = float64(msg.current) / float64(msg.total)
+		}
+		// Keep listening for the next update until the channel closes.
+		return m, listenProgress(m.progressCh)
 	}
 
 	return m, nil
 }
 
 // View renders the current view based on state
-func (m Model) View() string {
+func (m ScanModel) View() string {
 	if m.showHelp {
 		return m.viewHelp()
 	}
@@ -148,11 +200,15 @@ func (m Model) View() string {
 }
 
 // handleKeyPress processes keyboard input based on current state
-func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m ScanModel) handleKeyPress(msg tea.KeyMsg) (subView, tea.Cmd) {
 	// Global keys
 	switch msg.String() {
-	case "ctrl+c", "q":
-		return m, tea.Quit
+	case "q", "esc":
+		// Cancel any in-flight scan/processing before leaving.
+		if m.cancel != nil {
+			m.cancel()
+		}
+		return m, func() tea.Msg { return backToMenuMsg{} }
 	case "?":
 		m.showHelp = !m.showHelp
 		return m, nil
@@ -162,15 +218,13 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.state {
 	case stateReady:
 		return m.handleReadyKeys(msg)
-	case stateDone:
-		return m, nil
 	}
 
 	return m, nil
 }
 
 // handleReadyKeys processes keys in the ready state
-func (m Model) handleReadyKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m ScanModel) handleReadyKeys(msg tea.KeyMsg) (subView, tea.Cmd) {
 	switch msg.String() {
 	case "up", "k":
 		if m.cursor > 0 {
@@ -205,7 +259,7 @@ func (m Model) handleReadyKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // handleScanComplete processes the scan completion message
-func (m Model) handleScanComplete(msg scanCompleteMsg) (tea.Model, tea.Cmd) {
+func (m ScanModel) handleScanComplete(msg scanCompleteMsg) (subView, tea.Cmd) {
 	if msg.err != nil {
 		m.err = msg.err
 		m.state = stateDone
@@ -223,18 +277,8 @@ func (m Model) handleScanComplete(msg scanCompleteMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleMetadataFetched processes metadata fetch results
-func (m Model) handleMetadataFetched(msg metadataFetchedMsg) (tea.Model, tea.Cmd) {
-	if msg.index >= 0 && msg.index < len(m.books) {
-		if msg.err == nil && msg.metadata != nil {
-			m.books[msg.index].Metadata = msg.metadata
-		}
-	}
-	return m, nil
-}
-
 // handleProcessComplete processes the completion message
-func (m Model) handleProcessComplete(msg processCompleteMsg) (tea.Model, tea.Cmd) {
+func (m ScanModel) handleProcessComplete(msg processCompleteMsg) (subView, tea.Cmd) {
 	m.state = stateDone
 
 	if msg.err != nil {
@@ -246,15 +290,31 @@ func (m Model) handleProcessComplete(msg processCompleteMsg) (tea.Model, tea.Cmd
 	return m, nil
 }
 
-// startProcessing initiates the processing pipeline
-func (m Model) startProcessing() (tea.Model, tea.Cmd) {
-	var selectedBooks []models.Audiobook
+// selectedBooks returns the audiobooks the user has selected for processing.
+func (m ScanModel) selectedBooks() []models.Audiobook {
+	var books []models.Audiobook
 	for i, selected := range m.selected {
-		if selected && i < len(m.books) {
-			selectedBooks = append(selectedBooks, m.books[i])
+		if selected && i >= 0 && i < len(m.books) {
+			books = append(books, m.books[i])
 		}
 	}
+	return books
+}
 
+// selectedCount returns how many books are currently selected.
+func (m ScanModel) selectedCount() int {
+	count := 0
+	for _, selected := range m.selected {
+		if selected {
+			count++
+		}
+	}
+	return count
+}
+
+// startProcessing initiates the processing pipeline
+func (m ScanModel) startProcessing() (subView, tea.Cmd) {
+	selectedBooks := m.selectedBooks()
 	if len(selectedBooks) == 0 {
 		return m, nil
 	}
@@ -262,61 +322,25 @@ func (m Model) startProcessing() (tea.Model, tea.Cmd) {
 	m.state = stateProcessing
 	m.progress = 0.0
 
-	// Create metadata sources based on configuration
-	httpClient := &http.Client{}
-	var sources []metadata.MetadataSource
-	for _, sourceName := range m.config.Sources {
-		switch sourceName {
-		case "bookinfo":
-			sources = append(sources, metadata.NewBookInfo(httpClient))
-		case "googlebooks":
-			sources = append(sources, metadata.NewGoogleBooks(httpClient))
-		case "openlibrary":
-			sources = append(sources, metadata.NewOpenLibrary(httpClient))
-		}
-	}
+	// Presentation no longer assembles sources/cache itself: the factory in
+	// internal/core does it, reusing the shared cache handle.
+	fetcher := core.BuildFetcher(m.config, m.cache)
+	m.pipeline = core.BuildPipeline(m.config, m.sourcePath, m.destPath, fetcher)
 
-	// If no sources configured, use defaults (BookInfo first for better audiobook metadata)
-	if len(sources) == 0 {
-		sources = []metadata.MetadataSource{
-			metadata.NewBookInfo(httpClient),
-			metadata.NewGoogleBooks(httpClient),
-			metadata.NewOpenLibrary(httpClient),
-		}
-	}
-
-	// Create cache store
-	var cacheStore *cache.Store
-	home, err := os.UserHomeDir()
-	if err == nil {
-		cachePath := filepath.Join(home, ".cache", "audiosort", "metadata.db")
-		cacheStore, _ = cache.NewStore(cachePath) // Ignore errors, cache is optional
-	}
-
-	// Create fetcher
-	fetcher := metadata.NewFetcher(sources, cacheStore)
-
-	opts := core.PipelineOptions{
-		SourcePath: m.sourcePath,
-		DestPath:   m.destPath,
-		Workers:    m.config.ParallelWorkers,
-		CopyMode:   m.config.CopyMode,
-		SkipExist:  m.config.SkipExisting,
-		DryRun:     false,
-		Fetcher:    fetcher,
-	}
-
-	m.pipeline = core.NewPipeline(opts)
+	// Buffer the channel for the whole run so the pipeline never blocks on a
+	// slow UI consumer; listenProgress drains it at the UI's pace.
+	m.progressCh = make(chan core.ProgressUpdate, len(selectedBooks)+1)
 
 	return m, tea.Batch(
 		m.spinner.Tick,
-		processCmd(selectedBooks, m.pipeline, m.sourcePath),
+		processCmd(m.ctx, selectedBooks, m.pipeline, m.progressCh),
+		listenProgress(m.progressCh),
 	)
 }
 
 // View methods
 
-func (m Model) viewScanning() string {
+func (m ScanModel) viewScanning() string {
 	var sections []string
 
 	sections = append(sections, Header(m.width, "Scanning Audiobooks"))
@@ -330,20 +354,14 @@ func (m Model) viewScanning() string {
 	)
 }
 
-func (m Model) viewBookList() string {
+func (m ScanModel) viewBookList() string {
 	var sections []string
 
 	sections = append(sections, HeaderCompact("Scan Results"))
 	sections = append(sections, "")
 
 	// Summary
-	selectedCount := 0
-	for _, selected := range m.selected {
-		if selected {
-			selectedCount++
-		}
-	}
-	summary := fmt.Sprintf("Found %d audiobooks, %d selected", len(m.books), selectedCount)
+	summary := fmt.Sprintf("Found %d audiobooks, %d selected", len(m.books), m.selectedCount())
 	sections = append(sections, SubtitleStyle.Render(summary))
 	sections = append(sections, "")
 
@@ -358,6 +376,7 @@ func (m Model) viewBookList() string {
 		"a", "select all",
 		"enter", "process",
 		"?", "help",
+		"esc", "back",
 	))
 
 	return AppStyle.Width(m.width).Height(m.height).Render(
@@ -365,7 +384,7 @@ func (m Model) viewBookList() string {
 	)
 }
 
-func (m Model) renderBookList() string {
+func (m ScanModel) renderBookList() string {
 	if len(m.books) == 0 {
 		return Alert("warning", "No audiobooks found in "+m.sourcePath)
 	}
@@ -420,7 +439,7 @@ func (m Model) renderBookList() string {
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
-func (m Model) viewProcessing() string {
+func (m ScanModel) viewProcessing() string {
 	var sections []string
 
 	sections = append(sections, HeaderCompact("Processing"))
@@ -428,13 +447,7 @@ func (m Model) viewProcessing() string {
 	sections = append(sections, SpinnerWithText(m.spinner, "Processing audiobooks..."))
 	sections = append(sections, "")
 
-	// Progress bar
-	total := 0
-	for _, s := range m.selected {
-		if s {
-			total++
-		}
-	}
+	total := m.selectedCount()
 	if total == 0 {
 		total = 1
 	}
@@ -446,7 +459,7 @@ func (m Model) viewProcessing() string {
 	)
 }
 
-func (m Model) viewDone() string {
+func (m ScanModel) viewDone() string {
 	var sections []string
 
 	sections = append(sections, HeaderCompact("Complete"))
@@ -499,14 +512,14 @@ func (m Model) viewDone() string {
 	}
 
 	sections = append(sections, "")
-	sections = append(sections, Footer("q", "quit"))
+	sections = append(sections, Footer("esc", "back to menu", "q", "back to menu"))
 
 	return AppStyle.Width(m.width).Height(m.height).Render(
 		lipgloss.JoinVertical(lipgloss.Left, sections...),
 	)
 }
 
-func (m Model) viewHelp() string {
+func (m ScanModel) viewHelp() string {
 	var sections []string
 
 	sections = append(sections, HeaderCompact("Help"))
@@ -520,7 +533,7 @@ func (m Model) viewHelp() string {
 		{"s", "Skip selected"},
 		{"enter", "Process selected"},
 		{"?", "Toggle help"},
-		{"q", "Quit"},
+		{"esc/q", "Back to menu"},
 	}
 
 	var lines []string
@@ -539,20 +552,13 @@ func (m Model) viewHelp() string {
 	)
 }
 
-// Run starts the TUI application
+// Run starts the scan TUI as a standalone CLI sub-command
 func Run(sourcePath string, cfg *config.Config) error {
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
 
-	// DefaultOutput is set in config.DefaultConfig() to ~/Audiobooks-organized
-
-	p := tea.NewProgram(
-		New(sourcePath, cfg),
-		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(),
-	)
-
-	_, err := p.Run()
+	store, _ := cache.NewStore(config.CachePath()) // optional; nil on failure
+	_, err := newStandaloneProgram(NewScanModel(sourcePath, cfg, store)).Run()
 	return err
 }

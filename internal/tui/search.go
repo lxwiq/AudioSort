@@ -3,12 +3,12 @@ package tui
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
+	"audiosort/internal/cache"
 	"audiosort/internal/config"
-	"audiosort/internal/metadata"
+	"audiosort/internal/core"
 	"audiosort/pkg/models"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -20,6 +20,7 @@ import (
 // SearchModel is the model for the search TUI
 type SearchModel struct {
 	config *config.Config
+	cache  *cache.Store
 
 	// Input
 	input    textinput.Model
@@ -47,8 +48,9 @@ type searchResultsMsg struct {
 	err     error
 }
 
-// NewSearchModel creates a new search model
-func NewSearchModel(cfg *config.Config, initialQuery string) SearchModel {
+// NewSearchModel creates a new search model with the given configuration,
+// shared cache handle (may be nil) and optional initial query.
+func NewSearchModel(cfg *config.Config, store *cache.Store, initialQuery string) SearchModel {
 	ti := textinput.New()
 	ti.Placeholder = "Enter book title, author, or ISBN..."
 	ti.Focus()
@@ -57,13 +59,15 @@ func NewSearchModel(cfg *config.Config, initialQuery string) SearchModel {
 	ti.SetValue(initialQuery)
 
 	return SearchModel{
-		config:   cfg,
-		input:    ti,
-		query:    initialQuery,
-		spinner:  NewSpinner(),
-		width:    80,
-		height:   24,
-		selected: -1,
+		config:    cfg,
+		cache:     store,
+		input:     ti,
+		query:     initialQuery,
+		searching: initialQuery != "",
+		spinner:   NewSpinner(),
+		width:     80,
+		height:    24,
+		selected:  -1,
 	}
 }
 
@@ -71,30 +75,32 @@ func NewSearchModel(cfg *config.Config, initialQuery string) SearchModel {
 func (m SearchModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{textinput.Blink}
 
-	// If we have an initial query, search immediately
+	// If we have an initial query, search immediately. The searching flag is
+	// set by the constructor so it survives into the running model.
 	if m.query != "" {
-		m.searching = true
 		cmds = append(cmds, m.spinner.Tick, m.doSearch(m.query))
 	}
 
 	return tea.Batch(cmds...)
 }
 
+// SetSize updates the cached terminal dimensions and resizes the input.
+func (m SearchModel) SetSize(width, height int) subView {
+	m.width = width
+	m.height = height
+	m.input.Width = width - 10
+	return m
+}
+
 // Update handles messages for the search model
-func (m SearchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m SearchModel) Update(msg tea.Msg) (subView, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m.input.Width = m.width - 10
-		return m, nil
-
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c", "esc":
-			return m, tea.Quit
+		case "esc":
+			return m, func() tea.Msg { return backToMenuMsg{} }
 
 		case "enter":
 			if !m.searching && !m.searched {
@@ -133,7 +139,7 @@ func (m SearchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "q":
 			if m.searched {
-				return m, tea.Quit
+				return m, func() tea.Msg { return backToMenuMsg{} }
 			}
 		}
 
@@ -203,9 +209,9 @@ func (m SearchModel) View() string {
 	// Footer
 	sections = append(sections, "")
 	if m.searched {
-		sections = append(sections, Footer("↑/↓", "navigate", "enter", "details", "tab", "new search", "q", "quit"))
+		sections = append(sections, Footer("↑/↓", "navigate", "enter", "details", "tab", "new search", "q", "back"))
 	} else {
-		sections = append(sections, Footer("enter", "search", "esc", "quit"))
+		sections = append(sections, Footer("enter", "search", "esc", "back"))
 	}
 
 	return AppStyle.Width(m.width).Height(m.height).Render(
@@ -308,27 +314,32 @@ func (m SearchModel) renderBookDetails(book models.BookMetadata) string {
 	return BoxStyle.Width(m.width - 6).Render(content)
 }
 
-// doSearch creates a command to search for metadata
+// doSearch creates a command to search for metadata. It uses the same source
+// set as the scan pipeline (via core.MetadataSources): the configured sources,
+// in order, including BookInfo — instead of the previous hard-coded
+// GoogleBooks+OpenLibrary subset.
 func (m SearchModel) doSearch(query string) tea.Cmd {
+	cfg := m.config
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		client := &http.Client{Timeout: 10 * time.Second}
-
-		// Create sources
-		var sources []metadata.MetadataSource
-		sources = append(sources, metadata.NewGoogleBooks(client))
-		sources = append(sources, metadata.NewOpenLibrary(client))
+		sources := core.MetadataSources(cfg)
 
 		var allResults []models.BookMetadata
-
-		// Search each source
+		var lastErr error
 		for _, source := range sources {
 			results, err := source.Search(ctx, query)
-			if err == nil && len(results) > 0 {
-				allResults = append(allResults, results...)
+			if err != nil {
+				lastErr = err
+				continue
 			}
+			allResults = append(allResults, results...)
+		}
+
+		// Surface an error only when no source returned anything.
+		if len(allResults) == 0 && lastErr != nil {
+			return searchResultsMsg{err: lastErr}
 		}
 
 		// Limit results
@@ -346,11 +357,7 @@ func RunSearch(query string, cfg *config.Config) error {
 		cfg = config.DefaultConfig()
 	}
 
-	p := tea.NewProgram(
-		NewSearchModel(cfg, query),
-		tea.WithAltScreen(),
-	)
-
-	_, err := p.Run()
+	store, _ := cache.NewStore(config.CachePath()) // optional; nil on failure
+	_, err := newStandaloneProgram(NewSearchModel(cfg, store, query)).Run()
 	return err
 }

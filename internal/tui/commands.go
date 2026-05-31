@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"time"
 
 	"audiosort/internal/core"
 	"audiosort/pkg/models"
@@ -10,10 +9,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// scanCmd performs the initial scan for audiobooks
-func scanCmd(path string, scanner *core.Scanner) tea.Cmd {
+// scanCmd performs the initial scan for audiobooks under the given context, so
+// the caller can cancel a long scan when leaving the view.
+func scanCmd(ctx context.Context, path string, scanner *core.Scanner) tea.Cmd {
 	return func() tea.Msg {
-		ctx := context.Background()
 		audiobookChan, err := scanner.Scan(ctx, path)
 		if err != nil {
 			return scanCompleteMsg{err: err}
@@ -29,22 +28,25 @@ func scanCmd(path string, scanner *core.Scanner) tea.Cmd {
 	}
 }
 
-// processCmd processes selected audiobooks through the pipeline
-func processCmd(books []models.Audiobook, pipeline *core.Pipeline, sourcePath string) tea.Cmd {
+// processCmd processes the already-selected audiobooks through the pipeline,
+// honouring the selection (no re-scan) and streaming progress over the channel.
+// The context lets the caller cancel an in-flight run.
+func processCmd(ctx context.Context, books []models.Audiobook, pipeline *core.Pipeline, progress chan<- core.ProgressUpdate) tea.Cmd {
 	return func() tea.Msg {
-		ctx := context.Background()
-		summary, err := pipeline.Run(ctx, sourcePath)
-		if err != nil {
-			return processCompleteMsg{err: err}
-		}
-
+		summary := pipeline.ProcessBooks(ctx, books, progress)
 		return processCompleteMsg{summary: summary}
 	}
 }
 
-// tickCmd sends periodic tick messages for spinner animation
-func tickCmd() tea.Cmd {
-	return tea.Tick(time.Millisecond*100, func(t time.Time) tea.Msg {
-		return tickMsg{}
-	})
+// listenProgress waits for the next progress update and turns it into a
+// processProgressMsg. When the channel is closed it returns nil so the listen
+// loop stops. The model re-issues this command after each update it receives.
+func listenProgress(ch <-chan core.ProgressUpdate) tea.Cmd {
+	return func() tea.Msg {
+		update, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return processProgressMsg{current: update.Done, total: update.Total}
+	}
 }

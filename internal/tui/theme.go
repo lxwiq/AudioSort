@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 // Theme colors - consistent across the app
 var (
@@ -108,23 +112,6 @@ var (
 	HelpDescStyle = lipgloss.NewStyle().
 			Foreground(ColorTextDim)
 
-	// Table styles
-	TableHeaderStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(ColorSecondary).
-				BorderStyle(lipgloss.NormalBorder()).
-				BorderBottom(true).
-				BorderForeground(ColorBorder)
-
-	TableCellStyle = lipgloss.NewStyle().
-			Foreground(ColorText).
-			Padding(0, 1)
-
-	TableSelectedStyle = lipgloss.NewStyle().
-				Background(ColorHighlight).
-				Foreground(ColorText).
-				Padding(0, 1)
-
 	// Progress bar
 	ProgressFullStyle = lipgloss.NewStyle().
 				Foreground(ColorSuccess)
@@ -204,15 +191,8 @@ func RenderProgressBar(progress float64, width int) string {
 
 	empty := width - filled
 
-	fullBar := ""
-	for i := 0; i < filled; i++ {
-		fullBar += "█"
-	}
-
-	emptyBar := ""
-	for i := 0; i < empty; i++ {
-		emptyBar += "░"
-	}
+	fullBar := strings.Repeat("█", filled)
+	emptyBar := strings.Repeat("░", empty)
 
 	return ProgressFullStyle.Render(fullBar) + ProgressEmptyStyle.Render(emptyBar)
 }

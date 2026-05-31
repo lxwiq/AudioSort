@@ -23,12 +23,6 @@ const (
 	ModalMultiSelect
 )
 
-// Available options for select fields
-var (
-	AvailableSources = []string{"googlebooks", "bookinfo", "openlibrary"}
-	AvailableFormats = []string{"audiobookshelf", "plex", "json", "all"}
-)
-
 // EditModalResult is sent when the modal is closed
 type EditModalResult struct {
 	Confirmed bool
@@ -56,9 +50,9 @@ type EditModal struct {
 	numberMax   int
 
 	// Select (single choice)
-	selectOptions  []string
-	selectCursor   int
-	selectValue    string
+	selectOptions []string
+	selectCursor  int
+	selectValue   string
 
 	// MultiSelect (multiple choices with ordering)
 	multiOptions  []string
@@ -238,7 +232,15 @@ func (m EditModal) getValue() any {
 	case ModalBool:
 		return m.boolValue
 	case ModalNumber:
-		return m.numberValue
+		// Clamp the typed buffer to [min, max] only at confirmation time.
+		v := m.numberValue
+		if v < m.numberMin {
+			v = m.numberMin
+		}
+		if v > m.numberMax {
+			v = m.numberMax
+		}
+		return v
 	case ModalSelect:
 		if len(m.selectOptions) == 0 || m.selectCursor < 0 || m.selectCursor >= len(m.selectOptions) {
 			return ""
@@ -278,12 +280,7 @@ func (m *EditModal) autocomplete() {
 		return
 	}
 
-	// Expand ~
-	if len(value) > 0 && value[0] == '~' {
-		if home, err := os.UserHomeDir(); err == nil {
-			value = filepath.Join(home, value[1:])
-		}
-	}
+	value = expandHome(value)
 
 	dir := filepath.Dir(value)
 	prefix := filepath.Base(value)
@@ -326,18 +323,16 @@ func (m EditModal) updateNumber(msg tea.KeyMsg) (EditModal, tea.Cmd) {
 			m.numberValue++
 		}
 	case "0", "1", "2", "3", "4", "5", "6", "7", "8", "9":
-		// Allow direct number input
+		// Allow free typing into a buffer; the value is clamped to [min, max]
+		// at confirmation time (see getValue). A loose upper bound just guards
+		// against int overflow on absurd input.
 		if n, err := strconv.Atoi(msg.String()); err == nil {
-			newVal := m.numberValue*10 + n
-			if newVal <= m.numberMax {
+			if newVal := m.numberValue*10 + n; newVal < 1_000_000 {
 				m.numberValue = newVal
 			}
 		}
 	case "backspace":
 		m.numberValue = m.numberValue / 10
-		if m.numberValue < m.numberMin {
-			m.numberValue = m.numberMin
-		}
 	}
 	return m, nil
 }
