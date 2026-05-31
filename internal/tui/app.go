@@ -99,6 +99,7 @@ type ScanModel struct {
 
 	// State flags
 	showHelp bool
+	dryRun   bool // when true, simulate processing without moving any files
 
 	// Processing state
 	progress       float64
@@ -251,6 +252,8 @@ func (m ScanModel) handleReadyKeys(msg tea.KeyMsg) (subView, tea.Cmd) {
 			}
 		}
 		m.selected = make(map[int]bool)
+	case "d":
+		m.dryRun = !m.dryRun
 	case "enter":
 		return m.startProcessing()
 	}
@@ -325,7 +328,7 @@ func (m ScanModel) startProcessing() (subView, tea.Cmd) {
 	// Presentation no longer assembles sources/cache itself: the factory in
 	// internal/core does it, reusing the shared cache handle.
 	fetcher := core.BuildFetcher(m.config, m.cache)
-	m.pipeline = core.BuildPipeline(m.config, m.sourcePath, m.destPath, fetcher, false)
+	m.pipeline = core.BuildPipeline(m.config, m.sourcePath, m.destPath, fetcher, m.dryRun)
 
 	// Buffer the channel for the whole run so the pipeline never blocks on a
 	// slow UI consumer; listenProgress drains it at the UI's pace.
@@ -363,6 +366,11 @@ func (m ScanModel) viewBookList() string {
 	// Summary
 	summary := fmt.Sprintf("Found %d audiobooks, %d selected", len(m.books), m.selectedCount())
 	sections = append(sections, SubtitleStyle.Render(summary))
+
+	// Dry-run banner
+	if m.dryRun {
+		sections = append(sections, WarningStyle.Render("DRY RUN: files will NOT be moved (press d to toggle)"))
+	}
 	sections = append(sections, "")
 
 	// Book list
@@ -370,12 +378,16 @@ func (m ScanModel) viewBookList() string {
 
 	// Footer
 	sections = append(sections, "")
+	dryLabel := "dry-run: off"
+	if m.dryRun {
+		dryLabel = "dry-run: on"
+	}
 	sections = append(sections, Footer(
 		"↑/↓", "navigate",
 		"space", "toggle",
 		"a", "select all",
+		"d", dryLabel,
 		"enter", "process",
-		"?", "help",
 		"esc", "back",
 	))
 
@@ -447,7 +459,11 @@ func (m ScanModel) viewProcessing() string {
 
 	sections = append(sections, HeaderCompact("Processing"))
 	sections = append(sections, "")
-	sections = append(sections, SpinnerWithText(m.spinner, "Processing audiobooks..."))
+	label := "Processing audiobooks..."
+	if m.dryRun {
+		label = "Simulating (dry run)..."
+	}
+	sections = append(sections, SpinnerWithText(m.spinner, label))
 	sections = append(sections, "")
 
 	total := m.selectedCount()
@@ -467,6 +483,11 @@ func (m ScanModel) viewDone() string {
 
 	sections = append(sections, HeaderCompact("Complete"))
 	sections = append(sections, "")
+
+	if m.dryRun && m.err == nil {
+		sections = append(sections, Alert("warning", "DRY RUN — no files were moved"))
+		sections = append(sections, "")
+	}
 
 	if m.err != nil {
 		sections = append(sections, Alert("error", m.err.Error()))
@@ -534,6 +555,7 @@ func (m ScanModel) viewHelp() string {
 		{"space", "Toggle selection"},
 		{"a", "Select/deselect all"},
 		{"s", "Skip selected"},
+		{"d", "Toggle dry-run (no file moves)"},
 		{"enter", "Process selected"},
 		{"?", "Toggle help"},
 		{"esc/q", "Back to menu"},
