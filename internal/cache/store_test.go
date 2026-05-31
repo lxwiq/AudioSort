@@ -252,3 +252,43 @@ func TestStore_Close(t *testing.T) {
 		t.Errorf("Close() error = %v", err)
 	}
 }
+
+func TestStore_ClearAndStats(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "clear.db")
+
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer store.Close()
+
+	if err := store.SetMetadata("query-a", models.BookMetadata{Title: "A"}); err != nil {
+		t.Fatalf("SetMetadata() error = %v", err)
+	}
+	if err := store.SetMetadata("query-b", models.BookMetadata{Title: "B"}); err != nil {
+		t.Fatalf("SetMetadata() error = %v", err)
+	}
+
+	if meta, _ := store.Stats(); meta != 2 {
+		t.Fatalf("expected 2 metadata entries before clear, got %d", meta)
+	}
+
+	// Clear must operate on the already-open handle (no second open / no lock
+	// conflict) and empty the buckets.
+	if err := store.Clear(); err != nil {
+		t.Fatalf("Clear() error = %v", err)
+	}
+
+	if meta, processed := store.Stats(); meta != 0 || processed != 0 {
+		t.Fatalf("expected empty store after clear, got %d metadata, %d processed", meta, processed)
+	}
+
+	// The store must remain usable after clearing.
+	if err := store.SetMetadata("query-c", models.BookMetadata{Title: "C"}); err != nil {
+		t.Fatalf("SetMetadata() after clear error = %v", err)
+	}
+	if _, ok := store.GetMetadata("query-c"); !ok {
+		t.Fatalf("store should be usable after clear")
+	}
+}

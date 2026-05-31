@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -11,11 +12,9 @@ import (
 
 // PathInputModel is a TUI for entering a directory path
 type PathInputModel struct {
-	input     textinput.Model
-	title     string
-	err       error
-	confirmed bool
-	cancelled bool
+	input textinput.Model
+	title string
+	err   error
 
 	width  int
 	height int
@@ -53,32 +52,26 @@ func (m PathInputModel) Init() tea.Cmd {
 	return textinput.Blink
 }
 
-// Update handles input
-func (m PathInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m.input.Width = m.width - 20
-		return m, nil
+// SetSize updates the cached terminal dimensions and resizes the input.
+func (m PathInputModel) SetSize(width, height int) subView {
+	m.width = width
+	m.height = height
+	m.input.Width = width - 20
+	return m
+}
 
+// Update handles input
+func (m PathInputModel) Update(msg tea.Msg) (subView, tea.Cmd) {
+	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "esc":
-			m.cancelled = true
 			return m, func() tea.Msg {
 				return pathConfirmMsg{path: "", confirmed: false}
 			}
 
 		case "enter":
-			path := m.input.Value()
-
-			// Expand ~ to home directory
-			if len(path) > 0 && path[0] == '~' {
-				if home, err := os.UserHomeDir(); err == nil {
-					path = filepath.Join(home, path[1:])
-				}
-			}
+			path := expandHome(m.input.Value())
 
 			// Validate path exists
 			info, err := os.Stat(path)
@@ -87,11 +80,10 @@ func (m PathInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if !info.IsDir() {
-				m.err = os.ErrInvalid
+				m.err = fmt.Errorf("not a directory: %s", path)
 				return m, nil
 			}
 
-			m.confirmed = true
 			return m, func() tea.Msg {
 				return pathConfirmMsg{path: path, confirmed: true}
 			}
@@ -128,7 +120,7 @@ func (m PathInputModel) View() string {
 	// Error message
 	if m.err != nil {
 		sections = append(sections, "")
-		sections = append(sections, ErrorMsgStyle.Render("Path not found or not a directory"))
+		sections = append(sections, ErrorMsgStyle.Render(m.err.Error()))
 	}
 
 	// Hints
@@ -150,12 +142,7 @@ func (m *PathInputModel) autocomplete() {
 		return
 	}
 
-	// Expand ~
-	if len(path) > 0 && path[0] == '~' {
-		if home, err := os.UserHomeDir(); err == nil {
-			path = filepath.Join(home, path[1:])
-		}
-	}
+	path = expandHome(path)
 
 	// Get directory and prefix
 	dir := filepath.Dir(path)
@@ -185,39 +172,4 @@ func (m *PathInputModel) autocomplete() {
 			return
 		}
 	}
-}
-
-// Path returns the entered path
-func (m PathInputModel) Path() string {
-	return m.input.Value()
-}
-
-// Confirmed returns true if the path was confirmed
-func (m PathInputModel) Confirmed() bool {
-	return m.confirmed
-}
-
-// Cancelled returns true if the input was cancelled
-func (m PathInputModel) Cancelled() bool {
-	return m.cancelled
-}
-
-// RunPathInput runs the path input dialog and returns the selected path
-func RunPathInput(title, placeholder, defaultValue string) (string, bool, error) {
-	p := tea.NewProgram(
-		NewPathInputModel(title, placeholder, defaultValue),
-		tea.WithAltScreen(),
-	)
-
-	finalModel, err := p.Run()
-	if err != nil {
-		return "", false, err
-	}
-
-	m := finalModel.(PathInputModel)
-	if m.Cancelled() {
-		return "", false, nil
-	}
-
-	return m.Path(), m.Confirmed(), nil
 }

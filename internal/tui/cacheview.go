@@ -3,9 +3,9 @@ package tui
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"audiosort/internal/cache"
+	"audiosort/internal/config"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -13,13 +13,17 @@ import (
 
 // CacheModel is the model for the cache TUI
 type CacheModel struct {
+	store     *cache.Store // shared handle (may be nil)
 	cachePath string
 	cacheInfo cacheStats
+
+	// Entry counts (computed on load / refresh / clear, not per render)
+	metaCount      int
+	processedCount int
 
 	// State
 	confirmClear bool
 	confirmFocus bool // true = yes, false = no
-	cleared      bool
 	message      string
 	err          error
 
@@ -41,21 +45,20 @@ type cacheClearedMsg struct {
 	err error
 }
 
-// NewCacheModel creates a new cache model
-func NewCacheModel(cachePath string) CacheModel {
+// NewCacheModel creates a new cache model bound to the shared cache handle
+// (which may be nil). The path is used only for file-level statistics.
+func NewCacheModel(store *cache.Store, cachePath string) CacheModel {
 	if cachePath == "" {
-		home, _ := os.UserHomeDir()
-		cachePath = filepath.Join(home, ".cache", "audiosort", "metadata.db")
+		cachePath = config.CachePath()
 	}
 
-	stats := getCacheStats(cachePath)
-
-	return CacheModel{
+	m := CacheModel{
+		store:     store,
 		cachePath: cachePath,
-		cacheInfo: stats,
 		width:     80,
 		height:    24,
 	}
+	return m.refreshStats()
 }
 
 func getCacheStats(path string) cacheStats {
@@ -72,15 +75,17 @@ func getCacheStats(path string) cacheStats {
 	stats.sizeStr = formatBytes(info.Size())
 	stats.modTime = info.ModTime().Format("2006-01-02 15:04:05")
 
-	// Try to get entry count
-	store, err := cache.NewStore(path)
-	if err == nil {
-		// Note: We'd need to add a method to get count
-		// For now, just show file stats
-		store.Close()
-	}
-
 	return stats
+}
+
+// refreshStats recomputes the file stats and entry counts once, so View never
+// has to touch disk or open a bbolt transaction per frame.
+func (m CacheModel) refreshStats() CacheModel {
+	m.cacheInfo = getCacheStats(m.cachePath)
+	if m.store != nil {
+		m.metaCount, m.processedCount = m.store.Stats()
+	}
+	return m
 }
 
 func formatBytes(bytes int64) string {
@@ -101,14 +106,16 @@ func (m CacheModel) Init() tea.Cmd {
 	return nil
 }
 
-// Update handles messages for the cache model
-func (m CacheModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		return m, nil
+// SetSize updates the cached terminal dimensions.
+func (m CacheModel) SetSize(width, height int) subView {
+	m.width = width
+	m.height = height
+	return m
+}
 
+// Update handles messages for the cache model
+func (m CacheModel) Update(msg tea.Msg) (subView, tea.Cmd) {
+	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if m.confirmClear {
 			// Handle confirmation dialog
@@ -119,11 +126,9 @@ func (m CacheModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.confirmFocus = false
 			case "enter":
 				if m.confirmFocus {
-					// Clear cache
 					return m, m.doClearCache()
-				} else {
-					m.confirmClear = false
 				}
+				m.confirmClear = false
 			case "esc", "n":
 				m.confirmClear = false
 			case "y":
@@ -133,20 +138,24 @@ func (m CacheModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch msg.String() {
-		case "ctrl+c", "q", "esc":
-			return m, tea.Quit
+		case "q", "esc":
+			return m, func() tea.Msg { return backToMenuMsg{} }
 
 		case "c":
-			// Show confirmation
-			if m.cacheInfo.exists && !m.cleared {
+			// Reset any stale status, then ask for confirmation.
+			m.message = ""
+			m.err = nil
+			if m.cacheInfo.exists {
 				m.confirmClear = true
 				m.confirmFocus = false // Default to "No"
+			} else {
+				m.message = "No cache file to clear"
 			}
 
 		case "r":
-			// Refresh stats
-			m.cacheInfo = getCacheStats(m.cachePath)
+			m = m.refreshStats()
 			m.message = "Stats refreshed"
+			m.err = nil
 		}
 
 	case cacheClearedMsg:
@@ -155,9 +164,9 @@ func (m CacheModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			m.message = "Error: " + msg.err.Error()
 		} else {
-			m.cleared = true
+			m.err = nil
+			m = m.refreshStats()
 			m.message = "Cache cleared successfully!"
-			m.cacheInfo = getCacheStats(m.cachePath)
 		}
 	}
 
@@ -186,10 +195,8 @@ func (m CacheModel) View() string {
 		sections = append(sections, "")
 		if m.err != nil {
 			sections = append(sections, Alert("error", m.message))
-		} else if m.cleared {
-			sections = append(sections, Alert("success", m.message))
 		} else {
-			sections = append(sections, Alert("info", m.message))
+			sections = append(sections, Alert("success", m.message))
 		}
 	}
 
@@ -198,7 +205,7 @@ func (m CacheModel) View() string {
 	if m.confirmClear {
 		sections = append(sections, Footer("←/→", "select", "enter", "confirm", "esc", "cancel"))
 	} else {
-		sections = append(sections, Footer("c", "clear cache", "r", "refresh", "q", "quit"))
+		sections = append(sections, Footer("c", "clear cache", "r", "refresh", "q", "back"))
 	}
 
 	return AppStyle.Width(m.width).Height(m.height).Render(
@@ -220,10 +227,9 @@ func (m CacheModel) renderCacheInfo() string {
 		lines = append(lines, BoldStyle.Render("Path:     ")+TextStyle.Render(m.cacheInfo.path))
 		lines = append(lines, BoldStyle.Render("Size:     ")+TextStyle.Render(m.cacheInfo.sizeStr))
 		lines = append(lines, BoldStyle.Render("Modified: ")+TextStyle.Render(m.cacheInfo.modTime))
-
-		if m.cleared {
-			lines = append(lines, "")
-			lines = append(lines, SuccessStyle.Render(IconCheck+" Cache has been cleared"))
+		if m.store != nil {
+			lines = append(lines, BoldStyle.Render("Entries:  ")+TextStyle.Render(
+				fmt.Sprintf("%d metadata, %d processed", m.metaCount, m.processedCount)))
 		}
 	}
 
@@ -263,28 +269,25 @@ func (m CacheModel) renderConfirmDialog() string {
 		Render(content)
 }
 
+// doClearCache clears the cache through the shared store handle (no second
+// bbolt open, no file removal of an open database).
 func (m CacheModel) doClearCache() tea.Cmd {
+	store := m.store
 	return func() tea.Msg {
-		err := os.Remove(m.cachePath)
-		if err != nil && !os.IsNotExist(err) {
-			return cacheClearedMsg{err: err}
+		if store == nil {
+			return cacheClearedMsg{err: fmt.Errorf("cache is not available")}
 		}
-		return cacheClearedMsg{}
+		return cacheClearedMsg{err: store.Clear()}
 	}
 }
 
 // RunCache runs the cache TUI
 func RunCache(cachePath string) error {
 	if cachePath == "" {
-		home, _ := os.UserHomeDir()
-		cachePath = filepath.Join(home, ".cache", "audiosort", "metadata.db")
+		cachePath = config.CachePath()
 	}
 
-	p := tea.NewProgram(
-		NewCacheModel(cachePath),
-		tea.WithAltScreen(),
-	)
-
-	_, err := p.Run()
+	store, _ := cache.NewStore(cachePath) // optional; nil on failure
+	_, err := newStandaloneProgram(NewCacheModel(store, cachePath)).Run()
 	return err
 }

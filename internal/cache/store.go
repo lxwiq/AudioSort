@@ -139,6 +139,38 @@ func (s *Store) MarkProcessed(sourcePath, destPath, checksum string) error {
 	})
 }
 
+// Clear removes every cached metadata and processed-book record in a single
+// write transaction on the existing handle. It never opens a second handle, so
+// it is safe to call while the store is held open elsewhere (bbolt takes an
+// exclusive file lock).
+func (s *Store) Clear() error {
+	return s.db.Update(func(tx *bbolt.Tx) error {
+		for _, bucket := range [][]byte{metadataBucket, processedBucket} {
+			if err := tx.DeleteBucket(bucket); err != nil && err != bbolt.ErrBucketNotFound {
+				return err
+			}
+			if _, err := tx.CreateBucketIfNotExists(bucket); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// Stats reports how many entries each bucket holds.
+func (s *Store) Stats() (metadataCount, processedCount int) {
+	_ = s.db.View(func(tx *bbolt.Tx) error {
+		if b := tx.Bucket(metadataBucket); b != nil {
+			metadataCount = b.Stats().KeyN
+		}
+		if b := tx.Bucket(processedBucket); b != nil {
+			processedCount = b.Stats().KeyN
+		}
+		return nil
+	})
+	return metadataCount, processedCount
+}
+
 func (s *Store) Close() error {
 	return s.db.Close()
 }
