@@ -3,6 +3,7 @@ package tui
 import (
 	"audiosort/internal/cache"
 	"audiosort/internal/config"
+	"audiosort/internal/version"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -142,8 +143,8 @@ func (m MenuModel) View() string {
 	sections = append(sections, "")
 
 	// Version info
-	version := DimStyle.Render("v1.0.0")
-	sections = append(sections, version)
+	versionLine := DimStyle.Render(version.Version)
+	sections = append(sections, versionLine)
 
 	// Footer
 	sections = append(sections, "")

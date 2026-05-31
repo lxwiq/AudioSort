@@ -1,92 +1,173 @@
 name: Release
 
+# Auto-release on every push to main:
+#   1. compute the next semantic version from existing tags + commit messages
+#   2. create and push the matching git tag
+#   3. cross-compile binaries for macOS / Linux / Windows (with version baked in)
+#   4. publish a GitHub Release with the binaries and checksums
+#
+# Skip a release for a given push by including "[skip release]" (or "[skip ci]")
+# in the commit message. You can also trigger it manually from the Actions tab
+# and force the bump level (patch / minor / major).
+
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        type: choice
+        options: [auto, patch, minor, major]
+        default: auto
 
 permissions:
   contents: write
 
-jobs:
-  build:
-    name: Build
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - goos: darwin
-            goarch: amd64
-            suffix: darwin-amd64
-          - goos: darwin
-            goarch: arm64
-            suffix: darwin-arm64
-          - goos: linux
-            goarch: amd64
-            suffix: linux-amd64
-          - goos: linux
-            goarch: arm64
-            suffix: linux-arm64
-          - goos: windows
-            goarch: amd64
-            suffix: windows-amd64.exe
+concurrency:
+  group: release
+  cancel-in-progress: false
 
+jobs:
+  version:
+    name: Compute & tag version
+    runs-on: ubuntu-latest
+    if: ${{ !contains(github.event.head_commit.message, '[skip release]') && !contains(github.event.head_commit.message, '[skip ci]') }}
+    outputs:
+      tag: ${{ steps.bump.outputs.tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute next version
+        id: bump
+        env:
+          REQUESTED_BUMP: ${{ github.event.inputs.bump }}
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+
+          # Latest semver tag (vX.Y.Z), default to v0.0.0 when none exist.
+          latest="$(git tag --list 'v*.*.*' --sort=-v:refname | head -n1)"
+          if [ -z "$latest" ]; then
+            latest="v0.0.0"
+            range=""
+          else
+            range="${latest}..HEAD"
+          fi
+          echo "Latest tag: $latest"
+
+          ver="${latest#v}"
+          major="${ver%%.*}"; rest="${ver#*.}"
+          minor="${rest%%.*}"; patch="${rest#*.}"
+          major="${major:-0}"; minor="${minor:-0}"; patch="${patch:-0}"
+
+          # Decide the bump level.
+          bump="${REQUESTED_BUMP:-auto}"
+          if [ "$bump" = "auto" ] || [ -z "$bump" ]; then
+            bump="patch"
+            commits="$(git log ${range} --pretty=%B 2>/dev/null || true)"
+            if printf '%s' "$commits" | grep -qiE 'BREAKING[ -]CHANGE|^[a-z]+(\(.+\))?!:'; then
+              bump="major"
+            elif printf '%s' "$commits" | grep -qiE '^[[:space:]]*feat(\(.+\))?:'; then
+              bump="minor"
+            fi
+          fi
+          echo "Bump type: $bump"
+
+          case "$bump" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+          esac
+
+          newtag="v${major}.${minor}.${patch}"
+          echo "New tag: $newtag"
+          echo "tag=${newtag}" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push tag
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.bump.outputs.tag }}" -m "Release ${{ steps.bump.outputs.tag }}"
+          git push origin "${{ steps.bump.outputs.tag }}"
+
+  build:
+    name: Build ${{ matrix.suffix }}
+    needs: version
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: darwin, goarch: amd64, suffix: darwin-amd64 }
+          - { goos: darwin, goarch: arm64, suffix: darwin-arm64 }
+          - { goos: linux, goarch: amd64, suffix: linux-amd64 }
+          - { goos: linux, goarch: arm64, suffix: linux-arm64 }
+          - { goos: windows, goarch: amd64, suffix: windows-amd64.exe }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.tag }}
 
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version-file: go.mod
+          cache: true
 
       - name: Build
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
         run: |
-          go build -ldflags="-s -w" -o audiosort-${{ matrix.suffix }} ./cmd/audiosort
+          set -euo pipefail
+          VERSION="${{ needs.version.outputs.tag }}"
+          COMMIT="$(git rev-parse --short HEAD)"
+          DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          PKG="audiosort/internal/version"
+          LDFLAGS="-s -w -X ${PKG}.Version=${VERSION} -X ${PKG}.Commit=${COMMIT} -X ${PKG}.Date=${DATE}"
+          go build -trimpath -ldflags="${LDFLAGS}" -o "audiosort-${{ matrix.suffix }}" ./cmd/audiosort
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: audiosort-${{ matrix.suffix }}
           path: audiosort-${{ matrix.suffix }}
+          if-no-files-found: error
 
   release:
-    name: Release
-    needs: build
+    name: Publish release
+    needs: [version, build]
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          merge-multiple: true
 
-      - name: Prepare release files
+      - name: Generate checksums
         run: |
-          mkdir -p release
-          for dir in artifacts/*/; do
-            cp "$dir"* release/
-          done
-          cd release
-          for file in *; do
-            if [[ ! "$file" == *.exe ]]; then
-              chmod +x "$file"
-            fi
-            sha256sum "$file" >> checksums.txt
-          done
+          set -euo pipefail
+          cd artifacts
+          chmod +x audiosort-* 2>/dev/null || true
+          sha256sum audiosort-* > checksums.txt
+          cat checksums.txt
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: ${{ needs.version.outputs.tag }}
           files: |
-            release/*
+            artifacts/audiosort-*
+            artifacts/checksums.txt
           generate_release_notes: true
           draft: false
           prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

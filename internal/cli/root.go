@@ -3,6 +3,7 @@ package cli
 import (
 	"audiosort/internal/config"
 	"audiosort/internal/tui"
+	"audiosort/internal/version"
 
 	"github.com/spf13/cobra"
 )
@@ -22,6 +23,7 @@ like AudiobookShelf and SmartAudioBookPlayer.
 Run without arguments to launch the interactive menu.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
+	Version:       version.String(),
 	RunE:          runRoot,
 }
 

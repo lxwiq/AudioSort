@@ -8,6 +8,7 @@ import (
 	"audiosort/pkg/models"
 
 	"go.etcd.io/bbolt"
+	bolterrors "go.etcd.io/bbolt/errors"
 )
 
 type Store struct {
@@ -146,7 +147,7 @@ func (s *Store) MarkProcessed(sourcePath, destPath, checksum string) error {
 func (s *Store) Clear() error {
 	return s.db.Update(func(tx *bbolt.Tx) error {
 		for _, bucket := range [][]byte{metadataBucket, processedBucket} {
-			if err := tx.DeleteBucket(bucket); err != nil && err != bbolt.ErrBucketNotFound {
+			if err := tx.DeleteBucket(bucket); err != nil && err != bolterrors.ErrBucketNotFound {
 				return err
 			}
 			if _, err := tx.CreateBucketIfNotExists(bucket); err != nil {
