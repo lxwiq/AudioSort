@@ -422,8 +422,11 @@ func (m ScanModel) renderBookList() string {
 			cursor = InfoStyle.Render("> ")
 		}
 
-		// Book info
+		// Book info: prefer the title detected from embedded tags.
 		name := filepath.Base(book.Path)
+		if book.Probe != nil && book.Probe.Title != "" {
+			name = book.Probe.Title
+		}
 		status := RenderStatusBadge(string(book.Status))
 
 		line := cursor + checkbox + truncate(name, m.width-20) + " " + status

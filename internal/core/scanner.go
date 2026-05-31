@@ -5,10 +5,13 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
 	"audiosort/pkg/models"
+
+	"github.com/dhowden/tag"
 )
 
 var audioExtensions = map[string]bool{
@@ -144,9 +147,47 @@ func (s *Scanner) analyzeDirectory(ctx context.Context, dirPath string) *models.
 		return &models.Audiobook{
 			Path:   dirPath,
 			Files:  audioFiles,
+			Probe:  readProbe(audioFiles[0].Path),
 			Status: models.StatusPending,
 		}
 	}
 
 	return nil
+}
+
+// readProbe reads embedded tags from a single audio file to derive hints about
+// the book. It reads only the tag header (not the whole file). Returns nil when
+// no useful tags are present.
+func readProbe(path string) *models.Probe {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	m, err := tag.ReadFrom(f)
+	if err != nil {
+		return nil
+	}
+
+	// For audiobooks the book title is usually the album (each file is a
+	// chapter/part); the author is usually the album-artist.
+	title := m.Album()
+	if title == "" {
+		title = m.Title()
+	}
+	author := m.AlbumArtist()
+	if author == "" {
+		author = m.Artist()
+	}
+
+	year := ""
+	if y := m.Year(); y > 0 {
+		year = strconv.Itoa(y)
+	}
+
+	if title == "" && author == "" {
+		return nil
+	}
+	return &models.Probe{Title: title, Author: author, Year: year}
 }
