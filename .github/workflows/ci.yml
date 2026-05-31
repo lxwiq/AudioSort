@@ -45,7 +45,10 @@ jobs:
           cache: true
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v4
+        uses: golangci/golangci-lint-action@v9
         with:
           version: latest
-          args: --timeout=5m
+          # Compile golangci-lint from source with the runner's Go toolchain so
+          # it always supports the Go version targeted in go.mod (a prebuilt
+          # binary built with an older Go refuses to lint newer-Go modules).
+          install-mode: goinstall

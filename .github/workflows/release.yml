@@ -69,9 +69,13 @@ jobs:
           if [ "$bump" = "auto" ] || [ -z "$bump" ]; then
             bump="patch"
             commits="$(git log ${range} --pretty=%B 2>/dev/null || true)"
-            if printf '%s' "$commits" | grep -qiE 'BREAKING[ -]CHANGE|^[a-z]+(\(.+\))?!:'; then
+            # Conventional Commits markers are case-sensitive: a lowercase
+            # "type!:" subject prefix, or an uppercase "BREAKING CHANGE:" footer.
+            # (Case-insensitive matching would mis-fire on prose like
+            # "Breaking Changes:" in a commit body.)
+            if printf '%s' "$commits" | grep -qE '^BREAKING[ -]CHANGE:|^[a-z]+(\([^)]+\))?!:'; then
               bump="major"
-            elif printf '%s' "$commits" | grep -qiE '^[[:space:]]*feat(\(.+\))?:'; then
+            elif printf '%s' "$commits" | grep -qE '^feat(\([^)]+\))?:'; then
               bump="minor"
             fi
           fi
