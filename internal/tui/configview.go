@@ -55,6 +55,19 @@ func configFields() []fieldSpec {
 			},
 		},
 		{
+			label: "Outputs",
+			desc:  "Sidecar files written next to each book (opf/cover/json)",
+			value: func(c *config.Config) string { return strings.Join(c.Outputs, ", ") },
+			modal: func(c *config.Config) EditModal {
+				return NewMultiSelectModal("Outputs", "Edit Outputs", config.AvailableOutputs, c.Outputs)
+			},
+			apply: func(c *config.Config, v any) {
+				if s, ok := v.([]string); ok {
+					c.Outputs = s
+				}
+			},
+		},
+		{
 			label: "Default Output",
 			desc:  "Default destination directory",
 			value: func(c *config.Config) string { return c.DefaultOutput },
@@ -127,6 +140,7 @@ func configFields() []fieldSpec {
 func cloneConfig(c *config.Config) *config.Config {
 	cp := *c
 	cp.Sources = append([]string(nil), c.Sources...)
+	cp.Outputs = append([]string(nil), c.Outputs...)
 	return &cp
 }
 
@@ -345,6 +359,7 @@ func (m *ConfigModel) applyModalResult(result EditModalResult) {
 func (m *ConfigModel) commit() {
 	*m.config = *m.working
 	m.config.Sources = append([]string(nil), m.working.Sources...)
+	m.config.Outputs = append([]string(nil), m.working.Outputs...)
 }
 
 // save validates the working copy, commits it to the shared config and persists

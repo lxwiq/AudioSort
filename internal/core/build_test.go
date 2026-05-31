@@ -80,14 +80,37 @@ func TestMetadataSourcesRespectConfigOrder(t *testing.T) {
 	}
 }
 
-func TestMetadataSourcesFallbackIncludesBookInfo(t *testing.T) {
+func TestMetadataSourcesFallbackUsesCanonicalOrder(t *testing.T) {
 	cfg := &config.Config{Sources: nil}
 	sources := MetadataSources(cfg)
 	if len(sources) != len(config.AvailableSources) {
 		t.Fatalf("expected fallback to %d sources, got %d", len(config.AvailableSources), len(sources))
 	}
-	// "bookinfo first" canonical order.
-	if sources[0].Name() != "bookinfo" {
-		t.Fatalf("fallback should query bookinfo first, got %s", sources[0].Name())
+	// Audiobook-specific source first.
+	if sources[0].Name() != "audible" {
+		t.Fatalf("fallback should query audible first, got %s", sources[0].Name())
+	}
+}
+
+func TestAudibleRegionFromLanguage(t *testing.T) {
+	cases := map[string]string{"fr": "fr", "english": "com", "de": "de", "": "com", "ja": "co.jp"}
+	for lang, want := range cases {
+		if got := audibleRegion(lang); got != want {
+			t.Errorf("audibleRegion(%q) = %q, want %q", lang, got, want)
+		}
+	}
+}
+
+func TestBuildWritersFromOutputs(t *testing.T) {
+	if w := buildWriters(nil, "/dest"); w != nil {
+		t.Fatalf("no outputs should yield no writers, got %d", len(w))
+	}
+	w := buildWriters([]string{"opf", "cover", "json"}, "/dest")
+	if len(w) != 3 {
+		t.Fatalf("expected 3 writers, got %d", len(w))
+	}
+	// Unknown output names are ignored.
+	if w := buildWriters([]string{"opf", "bogus"}, "/dest"); len(w) != 1 {
+		t.Fatalf("unknown outputs should be skipped, got %d writers", len(w))
 	}
 }

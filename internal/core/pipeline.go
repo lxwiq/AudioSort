@@ -291,15 +291,28 @@ func (p *Pipeline) collectResults(results <-chan models.Result) *models.Summary 
 	return summary
 }
 
-// inferQuery generates a search query from an audiobook's path
+// inferQuery generates a search query from an audiobook's embedded tags when
+// available, falling back to the folder name.
 func inferQuery(book *models.Audiobook) string {
-	if book == nil || book.Path == "" {
+	if book == nil {
 		return ""
 	}
 
-	// Use the directory name as the query (folder names usually contain title/author)
-	query := filepath.Base(book.Path)
-	return cleanQuery(query)
+	// Prefer embedded tags: they are far more reliable than folder-name guesses.
+	if book.Probe != nil && book.Probe.Title != "" {
+		query := book.Probe.Title
+		if book.Probe.Author != "" {
+			query = book.Probe.Author + " " + query
+		}
+		return cleanQuery(query)
+	}
+
+	if book.Path == "" {
+		return ""
+	}
+
+	// Fall back to the directory name (folder names usually contain title/author).
+	return cleanQuery(filepath.Base(book.Path))
 }
 
 // cleanQuery removes noise from folder names to create better search queries

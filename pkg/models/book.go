@@ -40,8 +40,18 @@ type Audiobook struct {
 	Path     string        `json:"path"`
 	Files    []AudioFile   `json:"files"`
 	Metadata *BookMetadata `json:"metadata,omitempty"`
+	Probe    *Probe        `json:"probe,omitempty"`
 	Status   Status        `json:"status"`
 	Error    string        `json:"error,omitempty"`
+}
+
+// Probe holds hints read from the embedded tags of an audiobook's files
+// (ID3/MP4/FLAC...). It is used to build a better metadata-search query than
+// guessing from the folder name, and to display the detected title.
+type Probe struct {
+	Title  string `json:"title,omitempty"`
+	Author string `json:"author,omitempty"`
+	Year   string `json:"year,omitempty"`
 }
 
 type AudioFile struct {

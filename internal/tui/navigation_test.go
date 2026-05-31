@@ -119,3 +119,21 @@ func TestWindowSizePropagatesToActiveView(t *testing.T) {
 		t.Fatalf("window size should propagate to active view, got %dx%d", sm.width, sm.height)
 	}
 }
+
+func TestScanDryRunToggle(t *testing.T) {
+	m := NewScanModel("/tmp", config.DefaultConfig(), nil)
+	if m.dryRun {
+		t.Fatal("dry-run should default to off")
+	}
+	// In the ready state, 'd' toggles dry-run.
+	m.state = stateReady
+	sv, _ := m.Update(key("d"))
+	sm := sv.(ScanModel)
+	if !sm.dryRun {
+		t.Fatal("'d' should enable dry-run in ready state")
+	}
+	sv, _ = sm.Update(key("d"))
+	if sv.(ScanModel).dryRun {
+		t.Fatal("'d' should toggle dry-run back off")
+	}
+}
