@@ -19,9 +19,9 @@ type Config struct {
 }
 
 // AvailableSources is the canonical list of metadata sources, in the default
-// query order ("bookinfo first" for better audiobook metadata). It is the
+// query order (audiobook-specific sources first for richer metadata). It is the
 // single source of truth shared by the config defaults and the TUI editor.
-var AvailableSources = []string{"bookinfo", "googlebooks", "openlibrary"}
+var AvailableSources = []string{"audible", "bookinfo", "googlebooks", "openlibrary"}
 
 // AvailableFormats is the canonical list of output presets exposed in the UI.
 // Only presets that map to an organization pattern are listed; writer-only

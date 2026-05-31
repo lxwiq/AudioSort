@@ -15,8 +15,8 @@ func TestDefaultConfig(t *testing.T) {
 		t.Fatal("DefaultConfig() returned nil")
 	}
 
-	// Check default sources
-	expectedSources := []string{"bookinfo", "googlebooks", "openlibrary"}
+	// Check default sources (audiobook-specific source first)
+	expectedSources := []string{"audible", "bookinfo", "googlebooks", "openlibrary"}
 	if len(cfg.Sources) != len(expectedSources) {
 		t.Errorf("Sources length = %d, want %d", len(cfg.Sources), len(expectedSources))
 	}

@@ -2,6 +2,7 @@ package core
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"audiosort/internal/cache"
@@ -19,18 +20,21 @@ const metadataHTTPTimeout = 15 * time.Second
 // and the search view can no longer drift apart.
 func MetadataSources(cfg *config.Config) []metadata.MetadataSource {
 	client := &http.Client{Timeout: metadataHTTPTimeout}
+	region := audibleRegion(cfg.PreferredLanguage)
 
-	sources := buildSources(cfg.Sources, client)
+	sources := buildSources(cfg.Sources, client, region)
 	if len(sources) == 0 {
-		sources = buildSources(config.AvailableSources, client)
+		sources = buildSources(config.AvailableSources, client, region)
 	}
 	return sources
 }
 
-func buildSources(names []string, client *http.Client) []metadata.MetadataSource {
+func buildSources(names []string, client *http.Client, region string) []metadata.MetadataSource {
 	var sources []metadata.MetadataSource
 	for _, name := range names {
 		switch name {
+		case "audible":
+			sources = append(sources, metadata.NewAudible(client, region))
 		case "bookinfo":
 			sources = append(sources, metadata.NewBookInfo(client))
 		case "googlebooks":
@@ -40,6 +44,28 @@ func buildSources(names []string, client *http.Client) []metadata.MetadataSource
 		}
 	}
 	return sources
+}
+
+// audibleRegion maps a preferred-language hint to the matching Audible TLD.
+func audibleRegion(lang string) string {
+	switch strings.ToLower(strings.TrimSpace(lang)) {
+	case "fr", "fr-fr", "french":
+		return "fr"
+	case "de", "de-de", "german":
+		return "de"
+	case "es", "spanish":
+		return "es"
+	case "it", "italian":
+		return "it"
+	case "ja", "jp", "japanese":
+		return "co.jp"
+	case "en-gb", "uk":
+		return "co.uk"
+	case "en-au":
+		return "com.au"
+	default:
+		return "com"
+	}
 }
 
 // BuildFetcher assembles a metadata.Fetcher from the configured sources, reusing
