@@ -325,7 +325,7 @@ func (m ScanModel) startProcessing() (subView, tea.Cmd) {
 	// Presentation no longer assembles sources/cache itself: the factory in
 	// internal/core does it, reusing the shared cache handle.
 	fetcher := core.BuildFetcher(m.config, m.cache)
-	m.pipeline = core.BuildPipeline(m.config, m.sourcePath, m.destPath, fetcher)
+	m.pipeline = core.BuildPipeline(m.config, m.sourcePath, m.destPath, fetcher, false)
 
 	// Buffer the channel for the whole run so the pipeline never blocks on a
 	// slow UI consumer; listenProgress drains it at the UI's pace.

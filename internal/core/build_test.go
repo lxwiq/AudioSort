@@ -100,3 +100,17 @@ func TestAudibleRegionFromLanguage(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildWritersFromOutputs(t *testing.T) {
+	if w := buildWriters(nil, "/dest"); w != nil {
+		t.Fatalf("no outputs should yield no writers, got %d", len(w))
+	}
+	w := buildWriters([]string{"opf", "cover", "json"}, "/dest")
+	if len(w) != 3 {
+		t.Fatalf("expected 3 writers, got %d", len(w))
+	}
+	// Unknown output names are ignored.
+	if w := buildWriters([]string{"opf", "bogus"}, "/dest"); len(w) != 1 {
+		t.Fatalf("unknown outputs should be skipped, got %d writers", len(w))
+	}
+}

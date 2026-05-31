@@ -8,6 +8,7 @@ import (
 	"audiosort/internal/cache"
 	"audiosort/internal/config"
 	"audiosort/internal/metadata"
+	"audiosort/internal/output"
 )
 
 // metadataHTTPTimeout bounds every outbound metadata request.
@@ -84,15 +85,37 @@ func BuildFetcherFromConfig(cfg *config.Config) (*metadata.Fetcher, *cache.Store
 }
 
 // BuildPipeline builds a processing pipeline for the given source/destination
-// using the supplied fetcher.
-func BuildPipeline(cfg *config.Config, sourcePath, destPath string, fetcher *metadata.Fetcher) *Pipeline {
+// using the supplied fetcher. dryRun runs the pipeline without touching files.
+func BuildPipeline(cfg *config.Config, sourcePath, destPath string, fetcher *metadata.Fetcher, dryRun bool) *Pipeline {
 	return NewPipeline(PipelineOptions{
 		SourcePath: sourcePath,
 		DestPath:   destPath,
 		Workers:    cfg.ParallelWorkers,
 		CopyMode:   cfg.CopyMode,
 		SkipExist:  cfg.SkipExisting,
-		DryRun:     false,
+		DryRun:     dryRun,
 		Fetcher:    fetcher,
+		Writers:    buildWriters(cfg.Outputs, destPath),
 	})
+}
+
+// buildWriters instantiates the sidecar-file writers selected in the config.
+// The writers share one HTTP client (used by the cover downloader).
+func buildWriters(outputs []string, destPath string) []Writer {
+	if len(outputs) == 0 {
+		return nil
+	}
+	client := &http.Client{Timeout: metadataHTTPTimeout}
+	var writers []Writer
+	for _, o := range outputs {
+		switch o {
+		case "opf":
+			writers = append(writers, output.NewOPFWriter(destPath))
+		case "cover":
+			writers = append(writers, output.NewCoverWriter(destPath, client))
+		case "json":
+			writers = append(writers, output.NewJSONWriter(destPath))
+		}
+	}
+	return writers
 }
