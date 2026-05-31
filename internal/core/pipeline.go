@@ -73,6 +73,64 @@ func NewPipeline(opts PipelineOptions) *Pipeline {
 	}
 }
 
+// ProgressUpdate reports how many books have finished processing out of the total.
+type ProgressUpdate struct {
+	Done  int
+	Total int
+}
+
+// ProcessBooks runs the metadata/organize stages over an already-scanned set of
+// audiobooks, instead of re-scanning the source. It honours the caller's
+// selection and streams a ProgressUpdate after each book completes (when
+// progress is non-nil). The progress channel is closed before returning.
+//
+// Run is intentionally left untouched so the CLI path keeps its scan-everything
+// behaviour.
+func (p *Pipeline) ProcessBooks(ctx context.Context, books []models.Audiobook, progress chan<- ProgressUpdate) *models.Summary {
+	start := time.Now()
+	total := len(books)
+
+	// Feed the selected books into the existing worker pool.
+	bookChan := make(chan models.Audiobook)
+	go func() {
+		defer close(bookChan)
+		for _, book := range books {
+			select {
+			case bookChan <- book:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	results := p.processAudiobooks(ctx, bookChan)
+
+	summary := &models.Summary{}
+	done := 0
+	for result := range results {
+		summary.Total++
+		if result.Error != nil {
+			summary.Errors++
+			summary.Failures = append(summary.Failures, result)
+		} else if result.Audiobook != nil && result.Audiobook.Status == models.StatusSkipped {
+			summary.Skipped++
+		} else {
+			summary.Processed++
+		}
+
+		done++
+		if progress != nil {
+			progress <- ProgressUpdate{Done: done, Total: total}
+		}
+	}
+
+	summary.Duration = time.Since(start)
+	if progress != nil {
+		close(progress)
+	}
+	return summary
+}
+
 // Run executes the full pipeline: scan -> fetch metadata -> organize -> write outputs
 func (p *Pipeline) Run(ctx context.Context, sourcePath string) (*models.Summary, error) {
 	start := time.Now()
